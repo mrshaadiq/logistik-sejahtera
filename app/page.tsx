@@ -375,14 +375,16 @@ export default function LogistikSejahteraPage() {
           </div>
 
           <div className="flex items-center justify-between gap-3 md:justify-end md:gap-4">
-            <button
-              type="button"
-              onClick={() => setIsModalOpen(true)}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-slate-200 transition hover:bg-slate-800 md:hidden"
-            >
-              <PackagePlus className="h-4 w-4" />
-              Input Stok
-            </button>
+            {activeView === "inventori" && (
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(true)}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-slate-200 transition hover:bg-slate-800 md:hidden"
+              >
+                <PackagePlus className="h-4 w-4" />
+                Input Stok
+              </button>
+            )}
             <div className="mr-0 hidden text-right sm:block md:mr-4">
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
                 Admin Gudang
