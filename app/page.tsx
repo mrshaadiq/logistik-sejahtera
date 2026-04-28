@@ -348,22 +348,28 @@ export default function LogistikSejahteraPage() {
 
       <main className="flex min-h-screen flex-1 flex-col overflow-hidden pb-24 md:h-screen md:pb-0">
         <header className="flex flex-shrink-0 flex-col gap-4 border-b border-slate-200 bg-white px-4 py-4 sm:px-5 md:h-20 md:flex-row md:items-center md:justify-between md:px-8 md:py-0">
-          <div className="flex items-start justify-between gap-4 md:block">
-            <div className="md:hidden">
-              <div className="mb-3 flex items-center gap-3">
-                <div className="rounded-xl bg-slate-900 p-2 text-white shadow-sm">
-                  <Boxes className="h-4 w-4" />
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-slate-800">Logistik Sejahtera</p>
-                  <p className="text-[11px] text-slate-400">Dashboard gudang mobile</p>
-                </div>
+          <div className="flex items-center justify-between md:hidden">
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-slate-900 p-2 text-white shadow-sm">
+                <Boxes className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-sm font-bold leading-none text-slate-800">
+                  Logistik Sejahtera
+                </p>
+                <p className="mt-1 text-[11px] text-slate-400">Dashboard gudang</p>
               </div>
             </div>
-            <h2 className="text-xl font-bold text-slate-800">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-blue-600 to-blue-400 font-bold text-white shadow-md shadow-blue-100">
+              IC
+            </div>
+          </div>
+
+          <div className="md:block">
+            <h2 className="text-3xl font-bold leading-tight text-slate-800 md:text-xl">
               {viewTitles[activeView]}
             </h2>
-            <p className="mt-1 max-w-md text-xs text-slate-400">
+            <p className="mt-1 max-w-md text-sm leading-relaxed text-slate-400 md:text-xs">
               Pantau stok, expired, dan distribusi barang dari satu tampilan.
             </p>
           </div>
@@ -372,7 +378,7 @@ export default function LogistikSejahteraPage() {
             <button
               type="button"
               onClick={() => setIsModalOpen(true)}
-              className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-slate-200 transition hover:bg-slate-800 md:hidden"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-slate-200 transition hover:bg-slate-800 md:hidden"
             >
               <PackagePlus className="h-4 w-4" />
               Input Stok
@@ -383,41 +389,16 @@ export default function LogistikSejahteraPage() {
               </p>
               <p className="text-sm font-semibold text-slate-700">Icad Design</p>
             </div>
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-blue-600 to-blue-400 font-bold text-white shadow-md shadow-blue-100">
+            <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-blue-600 to-blue-400 font-bold text-white shadow-md shadow-blue-100 md:flex">
               IC
             </div>
           </div>
         </header>
 
-        <div className="border-b border-slate-200 bg-white px-4 pb-4 md:hidden">
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {mobileNavItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeView === item.id;
-
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setActiveView(item.id)}
-                  className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-xs font-semibold transition ${
-                    isActive
-                      ? "border-slate-900 bg-slate-900 text-white"
-                      : "border-slate-200 bg-slate-50 text-slate-600"
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                  {item.mobileLabel}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
         <div className="flex-1 overflow-y-auto p-4 pb-28 md:p-8 md:pb-8">
           {activeView === "ringkasan" && (
             <section className="animate-[fadeIn_0.3s_ease-in] space-y-8">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <StatCard
                   title="Total Unit Stok"
                   value={stats.total.toLocaleString("id-ID")}
@@ -702,17 +683,21 @@ function StatCard({
 }) {
   return (
     <div
-      className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6 ${className}`}
+      className={`h-full rounded-[1.75rem] border border-slate-200 bg-white p-4 shadow-sm md:rounded-2xl md:p-6 ${className}`}
     >
-      <div className="mb-4 flex items-start justify-between">
-        <div className={`rounded-lg p-2 ${iconClassName}`}>
-          <Icon className="h-5 w-5" />
+      <div className="flex h-full flex-col justify-between gap-6">
+        <div className="flex items-start justify-between gap-3">
+          <div className={`rounded-2xl p-3 ${iconClassName}`}>
+            <Icon className="h-5 w-5" />
+          </div>
+          <h3 className={`text-4xl font-bold leading-none ${textClassName}`}>{value}</h3>
         </div>
+        <p
+          className={`max-w-[10rem] text-[10px] font-bold uppercase leading-relaxed tracking-[0.18em] text-slate-400 ${textClassName}`}
+        >
+          {title}
+        </p>
       </div>
-      <p className={`text-[10px] font-bold uppercase text-slate-400 ${textClassName}`}>
-        {title}
-      </p>
-      <h3 className={`text-2xl font-bold sm:text-3xl ${textClassName}`}>{value}</h3>
     </div>
   );
 }
