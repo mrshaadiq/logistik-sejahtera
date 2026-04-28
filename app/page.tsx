@@ -51,6 +51,18 @@ const HISTORY_KEY = "ls_v3_history";
 const STORAGE_EVENT_PREFIX = "ls_v3_sync:";
 const EMPTY_DB: InventoryItem[] = [];
 const EMPTY_HISTORY: HistoryItem[] = [];
+const primaryNavItems: Array<{ id: ViewId; label: string; mobileLabel: string; icon: ElementType }> = [
+  { id: "ringkasan", label: "Ringkasan Utama", mobileLabel: "Ringkas", icon: ChartPie },
+  { id: "inventori", label: "Manajemen Stok", mobileLabel: "Stok", icon: Warehouse },
+  { id: "riwayat", label: "Log Transaksi", mobileLabel: "Riwayat", icon: ReceiptText },
+];
+const settingsNavItem = {
+  id: "pengaturan" as ViewId,
+  label: "Pengaturan",
+  mobileLabel: "Atur",
+  icon: SlidersHorizontal,
+};
+const mobileNavItems = [...primaryNavItems, settingsNavItem];
 
 const viewTitles: Record<ViewId, string> = {
   ringkasan: "Ringkasan Utama",
@@ -58,12 +70,6 @@ const viewTitles: Record<ViewId, string> = {
   riwayat: "Log Transaksi",
   pengaturan: "Pengaturan",
 };
-
-const navItems: Array<{ id: ViewId; label: string; icon: ElementType }> = [
-  { id: "ringkasan", label: "Ringkasan Utama", icon: ChartPie },
-  { id: "inventori", label: "Manajemen Stok", icon: Warehouse },
-  { id: "riwayat", label: "Log Transaksi", icon: ReceiptText },
-];
 
 function getTodayStart() {
   const today = new Date();
@@ -302,7 +308,7 @@ export default function LogistikSejahteraPage() {
         </div>
 
         <nav className="flex-1 space-y-1">
-          {navItems.map((item) => {
+          {primaryNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeView === item.id;
 
@@ -340,34 +346,78 @@ export default function LogistikSejahteraPage() {
         </div>
       </aside>
 
-      <main className="flex h-screen flex-1 flex-col overflow-hidden">
-        <header className="flex h-20 flex-shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5 md:px-8">
-          <div>
+      <main className="flex min-h-screen flex-1 flex-col overflow-hidden pb-24 md:h-screen md:pb-0">
+        <header className="flex flex-shrink-0 flex-col gap-4 border-b border-slate-200 bg-white px-4 py-4 sm:px-5 md:h-20 md:flex-row md:items-center md:justify-between md:px-8 md:py-0">
+          <div className="flex items-start justify-between gap-4 md:block">
+            <div className="md:hidden">
+              <div className="mb-3 flex items-center gap-3">
+                <div className="rounded-xl bg-slate-900 p-2 text-white shadow-sm">
+                  <Boxes className="h-4 w-4" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-800">Logistik Sejahtera</p>
+                  <p className="text-[11px] text-slate-400">Dashboard gudang mobile</p>
+                </div>
+              </div>
+            </div>
             <h2 className="text-xl font-bold text-slate-800">
               {viewTitles[activeView]}
             </h2>
-            <p className="mt-0.5 text-xs text-slate-400 md:hidden">
-              Logistik Sejahtera OS
+            <p className="mt-1 max-w-md text-xs text-slate-400">
+              Pantau stok, expired, dan distribusi barang dari satu tampilan.
             </p>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="mr-4 hidden text-right sm:block">
+          <div className="flex items-center justify-between gap-3 md:justify-end md:gap-4">
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(true)}
+              className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-slate-200 transition hover:bg-slate-800 md:hidden"
+            >
+              <PackagePlus className="h-4 w-4" />
+              Input Stok
+            </button>
+            <div className="mr-0 hidden text-right sm:block md:mr-4">
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
                 Admin Gudang
               </p>
               <p className="text-sm font-semibold text-slate-700">Icad Design</p>
             </div>
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-blue-600 to-blue-400 font-bold text-white shadow-md shadow-blue-100">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-blue-600 to-blue-400 font-bold text-white shadow-md shadow-blue-100">
               IC
             </div>
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-5 md:p-8">
+        <div className="border-b border-slate-200 bg-white px-4 pb-4 md:hidden">
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {mobileNavItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeView === item.id;
+
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setActiveView(item.id)}
+                  className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-xs font-semibold transition ${
+                    isActive
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-200 bg-slate-50 text-slate-600"
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {item.mobileLabel}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 pb-28 md:p-8 md:pb-8">
           {activeView === "ringkasan" && (
             <section className="animate-[fadeIn_0.3s_ease-in] space-y-8">
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <StatCard
                   title="Total Unit Stok"
                   value={stats.total.toLocaleString("id-ID")}
@@ -412,7 +462,7 @@ export default function LogistikSejahteraPage() {
 
           {activeView === "inventori" && (
             <section className="animate-[fadeIn_0.3s_ease-in] space-y-6">
-              <div className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-6 md:flex-row md:items-center md:justify-between">
+              <div className="hidden flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-6 md:flex md:flex-row md:items-center md:justify-between">
                 <div>
                   <h3 className="text-lg font-bold text-slate-800">
                     Basis Data Gudang
@@ -438,7 +488,7 @@ export default function LogistikSejahteraPage() {
           {activeView === "riwayat" && (
             <section className="animate-[fadeIn_0.3s_ease-in] space-y-6">
               <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white">
-                <div className="border-b border-slate-100 bg-slate-50/50 p-6 font-bold">
+                <div className="border-b border-slate-100 bg-slate-50/50 p-4 font-bold md:p-6">
                   Log Audit Sistem
                 </div>
 
@@ -451,7 +501,7 @@ export default function LogistikSejahteraPage() {
                     {history.slice(0, 10).map((item, index) => (
                       <div
                         key={`${item.time}-${index}`}
-                        className="flex items-center gap-4 p-5 transition hover:bg-slate-50"
+                        className="flex items-start gap-4 p-4 transition hover:bg-slate-50 md:items-center md:p-5"
                       >
                         <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
                           <History className="h-4 w-4" />
@@ -474,10 +524,10 @@ export default function LogistikSejahteraPage() {
 
           {activeView === "pengaturan" && (
             <section className="animate-[fadeIn_0.3s_ease-in] space-y-6">
-              <div className="max-w-xl rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+              <div className="max-w-xl rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-8">
                 <h3 className="mb-6 text-lg font-bold">Database Control</h3>
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between rounded-2xl border border-red-100 bg-red-50 p-5">
+                  <div className="flex flex-col gap-4 rounded-2xl border border-red-100 bg-red-50 p-5 md:flex-row md:items-center md:justify-between">
                     <div>
                       <p className="text-sm font-bold text-red-700">
                         Hapus Semua Data
@@ -501,12 +551,37 @@ export default function LogistikSejahteraPage() {
         </div>
       </main>
 
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
+        <div className="grid grid-cols-4 gap-2">
+          {mobileNavItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeView === item.id;
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveView(item.id)}
+                className={`flex flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-semibold transition ${
+                  isActive
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-500 hover:bg-slate-100"
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                {item.mobileLabel}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-md">
-          <div className="w-full max-w-md overflow-hidden rounded-[2rem] bg-white shadow-2xl">
-            <div className="bg-slate-900 p-8 text-white">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-0 backdrop-blur-md md:items-center md:p-4">
+          <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-t-[2rem] bg-white shadow-2xl md:rounded-[2rem]">
+            <div className="bg-slate-900 p-6 text-white md:p-8">
               <div className="mb-1 flex items-center justify-between">
-                <h3 className="text-2xl font-bold">Input Inventori</h3>
+                <h3 className="text-xl font-bold md:text-2xl">Input Inventori</h3>
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
@@ -520,7 +595,7 @@ export default function LogistikSejahteraPage() {
               </p>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-5 p-8">
+            <form onSubmit={handleSubmit} className="space-y-5 overflow-y-auto p-5 md:p-8">
               <div>
                 <label className="ml-1 mb-1.5 block text-[10px] font-bold uppercase text-slate-400">
                   Nama Produk
@@ -537,7 +612,7 @@ export default function LogistikSejahteraPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className="ml-1 mb-1.5 block text-[10px] font-bold uppercase text-slate-400">
                     Jumlah Unit
@@ -627,7 +702,7 @@ function StatCard({
 }) {
   return (
     <div
-      className={`rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ${className}`}
+      className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6 ${className}`}
     >
       <div className="mb-4 flex items-start justify-between">
         <div className={`rounded-lg p-2 ${iconClassName}`}>
@@ -637,7 +712,7 @@ function StatCard({
       <p className={`text-[10px] font-bold uppercase text-slate-400 ${textClassName}`}>
         {title}
       </p>
-      <h3 className={`text-3xl font-bold ${textClassName}`}>{value}</h3>
+      <h3 className={`text-2xl font-bold sm:text-3xl ${textClassName}`}>{value}</h3>
     </div>
   );
 }
@@ -658,7 +733,7 @@ function InventoryPanel({
   return (
     <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
       {title && (
-        <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/30 p-6">
+        <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/30 p-4 md:p-6">
           <div>
             <h3 className="font-bold text-slate-800">{title}</h3>
             {subtitle && <p className="text-[10px] text-slate-400">{subtitle}</p>}
@@ -671,8 +746,94 @@ function InventoryPanel({
           Belum ada data di gudang.
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
+        <>
+          <div className="divide-y divide-slate-100 md:hidden">
+            {items.map((item) => {
+              const label = getConditionLabel(item.expired);
+              const isInWarehouse = item.status === "Gudang";
+
+              return (
+                <article key={item.id} className="space-y-4 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-bold text-slate-700">{item.nama}</p>
+                      <p className="mt-1 text-[10px] text-slate-400">ID: {item.id}</p>
+                    </div>
+                    <div
+                      className={`flex shrink-0 items-center gap-2 rounded-xl border px-3 py-1.5 ${label.color}`}
+                    >
+                      <ConditionIcon type={label.icon} />
+                      <span className="text-[9px] font-extrabold uppercase tracking-tight">
+                        {label.text}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-2xl bg-slate-50 p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                        Status
+                      </p>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span
+                          className={`h-2 w-2 rounded-full ${
+                            item.status === "Gudang" ? "bg-blue-500" : "bg-emerald-500"
+                          }`}
+                        />
+                        <span className="font-semibold text-slate-700">{item.status}</span>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl bg-slate-50 p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                        Stok
+                      </p>
+                      <p className="mt-2 font-semibold text-slate-700">{item.jumlah} Pcs</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-slate-50 p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                      Tanggal Exp
+                    </p>
+                    <p className="mt-2 font-mono text-sm font-bold text-slate-600">
+                      {item.expired}
+                    </p>
+                  </div>
+
+                  <div className="flex gap-2">
+                    {isInWarehouse && (
+                      <button
+                        type="button"
+                        onClick={() => onShip(item.id)}
+                        disabled={label.blocked}
+                        className={`flex flex-1 items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+                          label.blocked
+                            ? "cursor-not-allowed bg-slate-100 text-slate-300"
+                            : "bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white"
+                        }`}
+                      >
+                        <Send className="h-4 w-4" />
+                        Distribusi
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => onDelete(item.id)}
+                      className="flex items-center justify-center gap-2 rounded-2xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-500 transition hover:bg-red-500 hover:text-white"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Hapus
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full text-left">
             <thead className="bg-slate-50 text-[10px] font-bold uppercase text-slate-400">
               <tr>
                 <th className="px-6 py-4">Nama Inventori</th>
@@ -764,7 +925,8 @@ function InventoryPanel({
               })}
             </tbody>
           </table>
-        </div>
+          </div>
+        </>
       )}
     </div>
   );
