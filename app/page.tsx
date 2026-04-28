@@ -1,7 +1,7 @@
 "use client";
 
-import type { ElementType, FormEvent, SetStateAction } from "react";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import type { ElementType, FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Boxes,
@@ -21,22 +21,9 @@ import {
   XCircle,
 } from "lucide-react";
 
+import type { HistoryItem, InventoryItem, ItemStatus } from "@/lib/logistics-types";
+
 type ViewId = "ringkasan" | "inventori" | "riwayat" | "pengaturan";
-type ItemStatus = "Gudang" | "Distribusi";
-
-type InventoryItem = {
-  id: number;
-  nama: string;
-  jumlah: number;
-  status: ItemStatus;
-  expired: string;
-  created: string;
-};
-
-type HistoryItem = {
-  time: string;
-  action: string;
-};
 
 type ConditionLabel = {
   text: string;
@@ -46,9 +33,6 @@ type ConditionLabel = {
   blocked: boolean;
 };
 
-const DB_KEY = "ls_v3_db";
-const HISTORY_KEY = "ls_v3_history";
-const STORAGE_EVENT_PREFIX = "ls_v3_sync:";
 const EMPTY_DB: InventoryItem[] = [];
 const EMPTY_HISTORY: HistoryItem[] = [];
 const primaryNavItems: Array<{ id: ViewId; label: string; mobileLabel: string; icon: ElementType }> = [
@@ -121,86 +105,14 @@ function ConditionIcon({ type }: { type: ConditionLabel["icon"] }) {
   return <CheckCircle2 className="h-3 w-3" />;
 }
 
-function parseStorageValue<T>(raw: string | null, fallback: T): T {
-  try {
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function readStorageSnapshot(key: string) {
-  if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(key);
-}
-
-function subscribeToStorage(key: string, onStoreChange: () => void) {
-  if (typeof window === "undefined") {
-    return () => {};
-  }
-
-  const customEventName = `${STORAGE_EVENT_PREFIX}${key}`;
-
-  const handleChange = (event: Event) => {
-    if (event instanceof StorageEvent && event.key !== key) {
-      return;
-    }
-
-    onStoreChange();
-  };
-
-  window.addEventListener("storage", handleChange);
-  window.addEventListener(customEventName, handleChange);
-
-  return () => {
-    window.removeEventListener("storage", handleChange);
-    window.removeEventListener(customEventName, handleChange);
-  };
-}
-
-function writeStorageValue<T>(key: string, value: T) {
-  if (typeof window === "undefined") return;
-
-  window.localStorage.setItem(key, JSON.stringify(value));
-  window.dispatchEvent(new Event(`${STORAGE_EVENT_PREFIX}${key}`));
-}
-
-function usePersistentState<T>(
-  key: string,
-  fallback: T,
-): [T, (value: SetStateAction<T>) => void] {
-  const rawSnapshot = useSyncExternalStore(
-    (onStoreChange) => subscribeToStorage(key, onStoreChange),
-    () => readStorageSnapshot(key),
-    () => null,
-  );
-  const value = useMemo(
-    () => parseStorageValue(rawSnapshot, fallback),
-    [fallback, rawSnapshot],
-  );
-
-  const setValue = (nextValue: SetStateAction<T>) => {
-    const resolvedValue =
-      typeof nextValue === "function"
-        ? (nextValue as (current: T) => T)(
-            parseStorageValue(readStorageSnapshot(key), fallback),
-          )
-        : nextValue;
-
-    writeStorageValue(key, resolvedValue);
-  };
-
-  return [value, setValue];
-}
-
 export default function LogistikSejahteraPage() {
   const [activeView, setActiveView] = useState<ViewId>("ringkasan");
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [db, setDb] = usePersistentState<InventoryItem[]>(DB_KEY, EMPTY_DB);
-  const [history, setHistory] = usePersistentState<HistoryItem[]>(
-    HISTORY_KEY,
-    EMPTY_HISTORY,
-  );
+  const [db, setDb] = useState<InventoryItem[]>(EMPTY_DB);
+  const [history, setHistory] = useState<HistoryItem[]>(EMPTY_HISTORY);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const [form, setForm] = useState({
     nama: "",
     jumlah: "",
@@ -208,12 +120,83 @@ export default function LogistikSejahteraPage() {
     expired: "",
   });
 
-  const addHistory = (action: string) => {
-    setHistory((current) => [
-      { time: new Date().toLocaleString("id-ID"), action },
-      ...current,
+  async function parseApiResponse<T>(response: Response): Promise<T> {
+    const payload = (await response.json()) as T | { error?: string };
+
+    if (!response.ok) {
+      const message =
+        typeof payload === "object" &&
+        payload !== null &&
+        "error" in payload &&
+        typeof payload.error === "string"
+          ? payload.error
+          : "Permintaan ke server gagal.";
+      throw new Error(message);
+    }
+
+    return payload as T;
+  }
+
+  async function loadDashboardData() {
+    const [inventoryResponse, historyResponse] = await Promise.all([
+      fetch("/api/inventory", { cache: "no-store" }),
+      fetch("/api/history", { cache: "no-store" }),
     ]);
-  };
+
+    const [inventoryData, historyData] = await Promise.all([
+      parseApiResponse<InventoryItem[]>(inventoryResponse),
+      parseApiResponse<HistoryItem[]>(historyResponse),
+    ]);
+
+    setDb(inventoryData);
+    setHistory(historyData);
+  }
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const initializeDashboard = async () => {
+      setIsLoading(true);
+      setErrorMessage("");
+
+      try {
+        const [inventoryResponse, historyResponse] = await Promise.all([
+          fetch("/api/inventory", { cache: "no-store" }),
+          fetch("/api/history", { cache: "no-store" }),
+        ]);
+
+        const [inventoryData, historyData] = await Promise.all([
+          parseApiResponse<InventoryItem[]>(inventoryResponse),
+          parseApiResponse<HistoryItem[]>(historyResponse),
+        ]);
+
+        if (!isMounted) {
+          return;
+        }
+
+        setDb(inventoryData);
+        setHistory(historyData);
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        setErrorMessage(
+          error instanceof Error ? error.message : "Gagal memuat data dashboard.",
+        );
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void initializeDashboard();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const sortedItems = useMemo(() => {
     return [...db].sort((a, b) => {
@@ -242,7 +225,7 @@ export default function LogistikSejahteraPage() {
     );
   }, [db]);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     const jumlah = Number.parseInt(form.jumlah, 10);
@@ -250,49 +233,106 @@ export default function LogistikSejahteraPage() {
       return;
     }
 
-    const item: InventoryItem = {
-      id: Date.now(),
-      nama: form.nama.trim(),
-      jumlah,
-      status: form.status,
-      expired: form.expired,
-      created: new Date().toLocaleString("id-ID"),
-    };
+    setIsSaving(true);
+    setErrorMessage("");
 
-    setDb((current) => [...current, item]);
-    addHistory(`Input barang baru: ${item.nama} sejumlah ${item.jumlah} Pcs`);
-    setForm({ nama: "", jumlah: "", status: "Gudang", expired: "" });
-    setIsModalOpen(false);
+    try {
+      const response = await fetch("/api/inventory", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          nama: form.nama.trim(),
+          jumlah,
+          status: form.status,
+          expired: form.expired,
+        }),
+      });
+
+      await parseApiResponse<{ id: number }>(response);
+      await loadDashboardData();
+
+      setForm({ nama: "", jumlah: "", status: "Gudang", expired: "" });
+      setIsModalOpen(false);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Gagal menyimpan data barang.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const shipItem = (id: number) => {
-    const item = db.find((entry) => entry.id === id);
-    if (!item) return;
+  const shipItem = async (id: number) => {
+    setIsSaving(true);
+    setErrorMessage("");
 
-    setDb((current) =>
-      current.map((entry) =>
-        entry.id === id ? { ...entry, status: "Distribusi" } : entry,
-      ),
-    );
-    addHistory(`Barang [${item.nama}] dipindahkan ke Distribusi`);
+    try {
+      const response = await fetch(`/api/inventory/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status: "Distribusi" }),
+      });
+
+      await parseApiResponse<{ success: true }>(response);
+      await loadDashboardData();
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Gagal memindahkan barang.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const deleteItem = (id: number) => {
-    const item = db.find((entry) => entry.id === id);
-    if (!item) return;
+  const deleteItem = async (id: number) => {
+    setIsSaving(true);
+    setErrorMessage("");
 
-    setDb((current) => current.filter((entry) => entry.id !== id));
-    addHistory(`Penghapusan data barang: ${item.nama}`);
+    try {
+      const response = await fetch(`/api/inventory/${id}`, {
+        method: "DELETE",
+      });
+
+      await parseApiResponse<{ success: true }>(response);
+      await loadDashboardData();
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Gagal menghapus barang.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const clearAllData = () => {
+  const clearAllData = async () => {
     const isConfirmed = window.confirm(
       "PERINGATAN: Semua data akan dihapus permanen. Lanjutkan?",
     );
 
     if (!isConfirmed) return;
-    setDb([]);
-    setHistory([]);
+
+    setIsSaving(true);
+    setErrorMessage("");
+
+    try {
+      const response = await fetch("/api/reset", {
+        method: "POST",
+      });
+
+      await parseApiResponse<{ success: true }>(response);
+      setDb([]);
+      setHistory([]);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Gagal menghapus semua data.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -398,6 +438,18 @@ export default function LogistikSejahteraPage() {
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 pb-28 md:p-8 md:pb-8">
+          {errorMessage && (
+            <div className="mb-6 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {errorMessage}
+            </div>
+          )}
+
+          {isLoading && (
+            <div className="mb-6 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+              Menghubungkan dashboard ke database...
+            </div>
+          )}
+
           {activeView === "ringkasan" && (
             <section className="animate-[fadeIn_0.3s_ease-in] space-y-8">
               <div className="grid grid-cols-2 gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -516,15 +568,16 @@ export default function LogistikSejahteraPage() {
                         Hapus Semua Data
                       </p>
                       <p className="text-xs italic text-red-600/70">
-                        Membersihkan LocalStorage secara permanen.
+                        Membersihkan semua data inventori dan log di Supabase.
                       </p>
                     </div>
                     <button
                       type="button"
                       onClick={clearAllData}
+                      disabled={isSaving}
                       className="rounded-xl bg-red-600 px-4 py-2 text-xs font-bold text-white hover:bg-red-700"
                     >
-                      WIPE DATA
+                      {isSaving ? "MEMPROSES..." : "WIPE DATA"}
                     </button>
                   </div>
                 </div>
@@ -656,9 +709,10 @@ export default function LogistikSejahteraPage() {
 
               <button
                 type="submit"
+                disabled={isSaving}
                 className="mt-4 w-full rounded-2xl bg-blue-600 py-5 font-bold text-white shadow-xl shadow-blue-200 transition hover:bg-blue-700 active:scale-95"
               >
-                SIMPAN KE DATABASE
+                {isSaving ? "MENYIMPAN..." : "SIMPAN KE DATABASE"}
               </button>
             </form>
           </div>
