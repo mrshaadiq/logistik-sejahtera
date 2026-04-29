@@ -9,10 +9,12 @@ import {
   ChartPie,
   CheckCircle2,
   Clock,
+  Filter,
   History,
   PackagePlus,
   Pencil,
   ReceiptText,
+  Search,
   Send,
   SlidersHorizontal,
   Trash2,
@@ -22,9 +24,15 @@ import {
   XCircle,
 } from "lucide-react";
 
-import type { HistoryItem, InventoryItem, ItemStatus } from "@/lib/logistics-types";
+import type {
+  DistributionItem,
+  HistoryItem,
+  InventoryItem,
+  ItemStatus,
+} from "@/lib/logistics-types";
 
-type ViewId = "ringkasan" | "inventori" | "riwayat" | "pengaturan";
+type ViewId = "ringkasan" | "inventori" | "distribusi" | "riwayat" | "pengaturan";
+type ExpiryFilter = "all" | "safe" | "near" | "expired" | "critical";
 
 type ConditionLabel = {
   text: string;
@@ -34,11 +42,20 @@ type ConditionLabel = {
   blocked: boolean;
 };
 
+type SearchMetadata = {
+  kategori: string;
+  batch: string;
+  lokasi: string;
+};
+
 const EMPTY_DB: InventoryItem[] = [];
+const EMPTY_DISTRIBUTION: DistributionItem[] = [];
 const EMPTY_HISTORY: HistoryItem[] = [];
+const CRITICAL_STOCK_THRESHOLD = 25;
 const primaryNavItems: Array<{ id: ViewId; label: string; mobileLabel: string; icon: ElementType }> = [
   { id: "ringkasan", label: "Ringkasan Utama", mobileLabel: "Ringkas", icon: ChartPie },
   { id: "inventori", label: "Manajemen Stok", mobileLabel: "Stok", icon: Warehouse },
+  { id: "distribusi", label: "Distribusi", mobileLabel: "Distribusi", icon: Truck },
   { id: "riwayat", label: "Log Transaksi", mobileLabel: "Riwayat", icon: ReceiptText },
 ];
 const settingsNavItem = {
@@ -52,6 +69,7 @@ const mobileNavItems = [...primaryNavItems, settingsNavItem];
 const viewTitles: Record<ViewId, string> = {
   ringkasan: "Ringkasan Utama",
   inventori: "Manajemen Stok",
+  distribusi: "Distribusi Barang",
   riwayat: "Log Transaksi",
   pengaturan: "Pengaturan",
 };
@@ -106,11 +124,72 @@ function ConditionIcon({ type }: { type: ConditionLabel["icon"] }) {
   return <CheckCircle2 className="h-3 w-3" />;
 }
 
+function isCriticalStock(jumlah: number) {
+  return jumlah <= CRITICAL_STOCK_THRESHOLD;
+}
+
+function getDerivedCategory(nama: string) {
+  const normalizedName = nama.toLowerCase();
+
+  if (
+    normalizedName.includes("susu") ||
+    normalizedName.includes("uht") ||
+    normalizedName.includes("teh") ||
+    normalizedName.includes("kopi") ||
+    normalizedName.includes("jus") ||
+    normalizedName.includes("sirup")
+  ) {
+    return "Minuman";
+  }
+
+  if (
+    normalizedName.includes("nugget") ||
+    normalizedName.includes("sosis") ||
+    normalizedName.includes("ayam") ||
+    normalizedName.includes("bakso") ||
+    normalizedName.includes("daging")
+  ) {
+    return "Makanan Beku";
+  }
+
+  if (
+    normalizedName.includes("saus") ||
+    normalizedName.includes("sambal") ||
+    normalizedName.includes("mayones") ||
+    normalizedName.includes("tomat")
+  ) {
+    return "Bumbu & Saus";
+  }
+
+  if (
+    normalizedName.includes("roti") ||
+    normalizedName.includes("biskuit") ||
+    normalizedName.includes("mie") ||
+    normalizedName.includes("snack")
+  ) {
+    return "Makanan Kering";
+  }
+
+  return "Umum";
+}
+
+function getItemMetadata(item: InventoryItem): SearchMetadata {
+  const rackLabel = item.id % 2 === 0 ? "Rak A" : "Rak B";
+  const zoneLabel = item.status === "Distribusi" ? "Distribusi" : "Gudang";
+
+  return {
+    kategori: getDerivedCategory(item.nama),
+    batch: `BT-${String(item.id).padStart(4, "0")}-${item.expired.slice(2, 7).replace("-", "")}`,
+    lokasi: `${zoneLabel} / ${rackLabel}`,
+  };
+}
+
 export default function LogistikSejahteraPage() {
   const [activeView, setActiveView] = useState<ViewId>("ringkasan");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [db, setDb] = useState<InventoryItem[]>(EMPTY_DB);
+  const [distribution, setDistribution] = useState<DistributionItem[]>(EMPTY_DISTRIBUTION);
   const [history, setHistory] = useState<HistoryItem[]>(EMPTY_HISTORY);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -170,17 +249,20 @@ export default function LogistikSejahteraPage() {
   }
 
   async function loadDashboardData() {
-    const [inventoryResponse, historyResponse] = await Promise.all([
+    const [inventoryResponse, distributionResponse, historyResponse] = await Promise.all([
       fetch("/api/inventory", { cache: "no-store" }),
+      fetch("/api/distribution", { cache: "no-store" }),
       fetch("/api/history", { cache: "no-store" }),
     ]);
 
-    const [inventoryData, historyData] = await Promise.all([
+    const [inventoryData, distributionData, historyData] = await Promise.all([
       parseApiResponse<InventoryItem[]>(inventoryResponse),
+      parseApiResponse<DistributionItem[]>(distributionResponse),
       parseApiResponse<HistoryItem[]>(historyResponse),
     ]);
 
     setDb(inventoryData);
+    setDistribution(distributionData);
     setHistory(historyData);
   }
 
@@ -192,13 +274,15 @@ export default function LogistikSejahteraPage() {
       setErrorMessage("");
 
       try {
-        const [inventoryResponse, historyResponse] = await Promise.all([
+        const [inventoryResponse, distributionResponse, historyResponse] = await Promise.all([
           fetch("/api/inventory", { cache: "no-store" }),
+          fetch("/api/distribution", { cache: "no-store" }),
           fetch("/api/history", { cache: "no-store" }),
         ]);
 
-        const [inventoryData, historyData] = await Promise.all([
+        const [inventoryData, distributionData, historyData] = await Promise.all([
           parseApiResponse<InventoryItem[]>(inventoryResponse),
+          parseApiResponse<DistributionItem[]>(distributionResponse),
           parseApiResponse<HistoryItem[]>(historyResponse),
         ]);
 
@@ -207,6 +291,7 @@ export default function LogistikSejahteraPage() {
         }
 
         setDb(inventoryData);
+        setDistribution(distributionData);
         setHistory(historyData);
       } catch (error) {
         if (!isMounted) {
@@ -242,6 +327,21 @@ export default function LogistikSejahteraPage() {
       return new Date(a.expired).getTime() - new Date(b.expired).getTime();
     });
   }, [db]);
+
+  const distributionInventoryItems = useMemo<InventoryItem[]>(() => {
+    if (distribution.length > 0) {
+      return distribution.map((item) => ({
+        id: item.inventoryItemId,
+        nama: item.nama,
+        jumlah: item.jumlah,
+        status: item.status,
+        expired: item.expired,
+        created: item.distributedAt,
+      }));
+    }
+
+    return db.filter((item) => item.status === "Distribusi");
+  }, [db, distribution]);
 
   const stats = useMemo(() => {
     return db.reduce(
@@ -327,6 +427,7 @@ export default function LogistikSejahteraPage() {
 
       await parseApiResponse<{ success: true }>(response);
       await loadDashboardData();
+      setActiveView("distribusi");
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "Gagal memindahkan barang.",
@@ -373,6 +474,7 @@ export default function LogistikSejahteraPage() {
 
       await parseApiResponse<{ success: true }>(response);
       setDb([]);
+      setDistribution([]);
       setHistory([]);
     } catch (error) {
       setErrorMessage(
@@ -574,6 +676,28 @@ export default function LogistikSejahteraPage() {
             </section>
           )}
 
+          {activeView === "distribusi" && (
+            <section className="animate-[fadeIn_0.3s_ease-in] space-y-6">
+              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+                <h3 className="text-lg font-bold text-slate-800">Daftar Barang Distribusi</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  Barang yang dikirim dari gudang akan otomatis muncul di halaman ini untuk
+                  dipantau proses distribusinya.
+                </p>
+              </div>
+
+              <InventoryPanel
+                title="Queue Distribusi"
+                subtitle="Menampilkan barang yang sudah dipindahkan dari gudang ke distribusi"
+                items={distributionInventoryItems}
+                onEdit={openEditModal}
+                onShip={shipItem}
+                onDelete={deleteItem}
+                mode="distribution"
+              />
+            </section>
+          )}
+
           {activeView === "riwayat" && (
             <section className="animate-[fadeIn_0.3s_ease-in] space-y-6">
               <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white">
@@ -642,7 +766,7 @@ export default function LogistikSejahteraPage() {
       </main>
 
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-5 gap-2">
           {mobileNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeView === item.id;
@@ -829,6 +953,7 @@ function InventoryPanel({
   onEdit,
   onShip,
   onDelete,
+  mode = "inventory",
 }: {
   title?: string;
   subtitle?: string;
@@ -836,7 +961,56 @@ function InventoryPanel({
   onEdit: (item: InventoryItem) => void;
   onShip: (id: number) => void;
   onDelete: (id: number) => void;
+  mode?: "inventory" | "distribution";
 }) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeFilter, setActiveFilter] = useState<ExpiryFilter>("all");
+  const showShipAction = mode === "inventory";
+
+  const filteredItems = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+
+    return items.filter((item) => {
+      const label = getConditionLabel(item.expired);
+      const metadata = getItemMetadata(item);
+      const matchesQuery =
+        normalizedQuery.length === 0 ||
+        [
+          item.nama,
+          item.id.toString(),
+          metadata.kategori,
+          metadata.batch,
+          metadata.lokasi,
+          item.status,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedQuery);
+
+      if (!matchesQuery) {
+        return false;
+      }
+
+      if (activeFilter === "all") {
+        return true;
+      }
+
+      if (activeFilter === "critical") {
+        return isCriticalStock(item.jumlah);
+      }
+
+      if (activeFilter === "expired") {
+        return label.priority === 1;
+      }
+
+      if (activeFilter === "near") {
+        return label.priority === 2;
+      }
+
+      return label.priority === 3;
+    });
+  }, [activeFilter, items, searchQuery]);
+
   return (
     <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
       {title && (
@@ -848,23 +1022,63 @@ function InventoryPanel({
         </div>
       )}
 
-      {items.length === 0 ? (
+      <div className="border-b border-slate-100 bg-white px-4 py-4 md:px-6">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <label className="relative block md:max-w-sm md:flex-1">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Cari nama, ID, kategori, batch, atau lokasi..."
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+            />
+          </label>
+
+          <label className="relative block md:w-64">
+            <Filter className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <select
+              value={activeFilter}
+              onChange={(event) => setActiveFilter(event.target.value as ExpiryFilter)}
+              className="w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+            >
+              <option value="all">Semua Barang</option>
+              <option value="safe">Kondisi Aman</option>
+              <option value="near">Mendekati Expired</option>
+              <option value="expired">Sudah Expired</option>
+              <option value="critical">Stok Kritis</option>
+            </select>
+          </label>
+        </div>
+        <p className="mt-3 text-[11px] text-slate-400">
+          Search aktif secara real-time. Filter `Stok Kritis` menampilkan barang dengan stok
+          {` <= ${CRITICAL_STOCK_THRESHOLD} pcs.`}
+        </p>
+      </div>
+
+      {filteredItems.length === 0 ? (
         <div className="p-12 text-center italic text-slate-400">
-          Belum ada data di gudang.
+          {items.length === 0
+            ? "Belum ada data di gudang."
+            : "Tidak ada barang yang cocok dengan pencarian atau filter."}
         </div>
       ) : (
         <>
           <div className="divide-y divide-slate-100 md:hidden">
-            {items.map((item) => {
+            {filteredItems.map((item) => {
               const label = getConditionLabel(item.expired);
               const isInWarehouse = item.status === "Gudang";
+              const metadata = getItemMetadata(item);
 
               return (
                 <article key={item.id} className="space-y-4 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="font-bold text-slate-700">{item.nama}</p>
-                      <p className="mt-1 text-[10px] text-slate-400">ID: {item.id}</p>
+                      <p className="mt-1 text-[10px] text-slate-400">
+                        ID: {item.id} | {metadata.kategori} | {metadata.batch}
+                      </p>
+                      <p className="mt-1 text-[10px] text-slate-400">{metadata.lokasi}</p>
                     </div>
                     <div
                       className={`flex shrink-0 items-center gap-2 rounded-xl border px-3 py-1.5 ${label.color}`}
@@ -909,6 +1123,13 @@ function InventoryPanel({
                   </div>
 
                   <div className="flex gap-2">
+                    {showShipAction && label.blocked && isInWarehouse ? (
+                      <div className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-400">
+                        <XCircle className="h-4 w-4" />
+                        Tidak Layak Distribusi
+                      </div>
+                    ) : null}
+
                     <button
                       type="button"
                       onClick={() => onEdit(item)}
@@ -918,15 +1139,12 @@ function InventoryPanel({
                       Edit
                     </button>
 
-                    {isInWarehouse && (
+                    {showShipAction && isInWarehouse && !label.blocked && (
                       <button
                         type="button"
                         onClick={() => onShip(item.id)}
-                        disabled={label.blocked}
                         className={`flex flex-1 items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold transition ${
-                          label.blocked
-                            ? "cursor-not-allowed bg-slate-100 text-slate-300"
-                            : "bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white"
+                          "bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white"
                         }`}
                       >
                         <Send className="h-4 w-4" />
@@ -960,15 +1178,19 @@ function InventoryPanel({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {items.map((item) => {
+              {filteredItems.map((item) => {
                 const label = getConditionLabel(item.expired);
                 const isInWarehouse = item.status === "Gudang";
+                const metadata = getItemMetadata(item);
 
                 return (
                   <tr key={item.id} className="group transition hover:bg-slate-50">
                     <td className="px-6 py-5">
                       <p className="font-bold text-slate-700">{item.nama}</p>
-                      <p className="text-[9px] text-slate-400">ID: {item.id}</p>
+                      <p className="text-[9px] text-slate-400">
+                        ID: {item.id} | {metadata.kategori} | {metadata.batch}
+                      </p>
+                      <p className="text-[9px] text-slate-400">{metadata.lokasi}</p>
                     </td>
 
                     <td className="px-6 py-5">
@@ -1006,6 +1228,12 @@ function InventoryPanel({
 
                     <td className="px-6 py-5 text-right">
                       <div className="flex justify-end gap-2 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
+                        {showShipAction && label.blocked && isInWarehouse ? (
+                          <span className="inline-flex items-center rounded-xl bg-slate-100 px-3 text-[11px] font-semibold text-slate-400">
+                            Tidak Layak Distribusi
+                          </span>
+                        ) : null}
+
                         <button
                           type="button"
                           onClick={() => onEdit(item)}
@@ -1015,21 +1243,14 @@ function InventoryPanel({
                           <Pencil className="h-4 w-4" />
                         </button>
 
-                        {isInWarehouse && (
+                        {showShipAction && isInWarehouse && !label.blocked && (
                           <button
                             type="button"
                             onClick={() => onShip(item.id)}
-                            disabled={label.blocked}
                             className={`flex h-10 w-10 items-center justify-center rounded-xl transition ${
-                              label.blocked
-                                ? "cursor-not-allowed bg-slate-100 text-slate-300"
-                                : "bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white"
+                              "bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white"
                             }`}
-                            title={
-                              label.blocked
-                                ? "Barang expired tidak bisa didistribusikan"
-                                : "Kirim ke distribusi"
-                            }
+                            title="Kirim ke distribusi"
                           >
                             <Send className="h-4 w-4" />
                           </button>

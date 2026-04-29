@@ -9,6 +9,18 @@ export type InventoryItem = {
   created: string;
 };
 
+export type DistributionItem = {
+  id: number;
+  inventoryItemId: number;
+  nama: string;
+  jumlah: number;
+  status: ItemStatus;
+  expired: string;
+  sourceLocation: string;
+  queueStatus: "Menunggu Distribusi";
+  distributedAt: string;
+};
+
 export type HistoryItem = {
   time: string;
   action: string;

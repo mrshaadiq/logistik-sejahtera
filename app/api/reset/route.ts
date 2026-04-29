@@ -4,6 +4,15 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function POST() {
   try {
+    const { error: distributionError } = await supabaseAdmin
+      .from("distribution_items")
+      .delete()
+      .gte("id", 0);
+
+    if (distributionError && distributionError.code !== "PGRST205") {
+      throw new Error(`Failed to delete distribution items: ${distributionError.message}`);
+    }
+
     const { error: historyError } = await supabaseAdmin
       .from("history_logs")
       .delete()

@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { createHistoryLog } from "@/lib/logistics-data";
+import {
+  createHistoryLog,
+  getInventoryItemById,
+  removeDistributionItem,
+  syncDistributionItem,
+} from "@/lib/logistics-data";
 import type { ItemStatus } from "@/lib/logistics-types";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -114,6 +119,14 @@ export async function PATCH(request: Request, context: InventoryRouteContext) {
       throw new Error(`Failed to update inventory item: ${error.message}`);
     }
 
+    const updatedItem = await getInventoryItemById(id);
+
+    if (updatedItem.status === "Distribusi") {
+      await syncDistributionItem(updatedItem);
+    } else {
+      await removeDistributionItem(id);
+    }
+
     if (
       Object.keys(updates).length === 1 &&
       updates.status !== undefined &&
@@ -144,6 +157,7 @@ export async function DELETE(_request: Request, context: InventoryRouteContext) 
     }
 
     const itemName = await getItemName(id);
+    await removeDistributionItem(id);
 
     const { error } = await supabaseAdmin.from("inventory_items").delete().eq("id", id);
 
