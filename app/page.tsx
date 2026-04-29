@@ -19,7 +19,6 @@ import {
   ReceiptText,
   Search,
   Send,
-  ShieldCheck,
   SlidersHorizontal,
   Trash2,
   Truck,
@@ -661,149 +660,118 @@ export default function LogistikSejahteraPage() {
 
   if (authState.status !== "authenticated") {
     return (
-      <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#eff6ff_30%,_#f8fafc_100%)] px-4 py-10 text-slate-900 sm:px-6 lg:px-8">
-        <div className="mx-auto grid max-w-6xl gap-8 lg:grid-cols-[1.15fr_0.85fr]">
-          <section className="rounded-[2rem] border border-white/70 bg-white/80 p-8 shadow-xl shadow-blue-100 backdrop-blur md:p-10">
-            <div className="inline-flex items-center gap-3 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white">
-              <Boxes className="h-4 w-4" />
-              Logistik Sejahtera
+      <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#eff6ff_35%,_#f8fafc_100%)] px-4 py-10 text-slate-900 sm:px-6 lg:px-8">
+        <section className="w-full max-w-xl rounded-[2rem] border border-slate-200 bg-slate-950 p-6 text-white shadow-2xl shadow-slate-300 md:p-8">
+          <div className="flex flex-col items-center text-center">
+            <div className="flex h-18 w-18 items-center justify-center rounded-[1.75rem] bg-gradient-to-br from-blue-500 to-blue-700 shadow-lg shadow-blue-900/30">
+              <Boxes className="h-8 w-8" />
             </div>
-            <h1 className="mt-6 max-w-xl text-4xl font-black tracking-tight text-slate-900">
-              Login gudang, distribusi, dan laporan CSV dalam satu dashboard.
-            </h1>
-            <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">
-              Akun disimpan di Supabase, sesi diamankan dengan cookie HTTP-only, dan
-              distribusi sekarang otomatis mengurangi stok di gudang.
-            </p>
-
-            <div className="mt-8 grid gap-4 md:grid-cols-3">
-              <FeatureCard
-                icon={ShieldCheck}
-                title="Akses Terkontrol"
-                description="Username dan password tersimpan di database Supabase dengan hash."
-              />
-              <FeatureCard
-                icon={Truck}
-                title="Stok Berkurang Otomatis"
-                description="Saat barang masuk distribusi, jumlah stok gudang langsung dipotong."
-              />
-              <FeatureCard
-                icon={FileSpreadsheet}
-                title="Ekspor CSV"
-                description="Laporan inventori, distribusi, dan riwayat siap diunduh kapan saja."
-              />
+            <div className="mt-5">
+              <p className="text-xs font-bold uppercase tracking-[0.3em] text-blue-300">
+                Logistik Sejahtera
+              </p>
+              <h1 className="mt-3 text-3xl font-black tracking-tight text-white">
+                {authState.setupRequired ? "Buat akun pertama" : "Masuk ke dashboard"}
+              </h1>
             </div>
-          </section>
-
-          <section className="rounded-[2rem] border border-slate-200 bg-slate-950 p-6 text-white shadow-2xl shadow-slate-300 md:p-8">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.3em] text-blue-300">
-                  Portal Admin
-                </p>
-                <h2 className="mt-3 text-2xl font-bold">
-                  {authState.setupRequired ? "Buat akun pertama" : "Masuk ke dashboard"}
-                </h2>
-              </div>
-              <div className="rounded-2xl bg-white/10 p-3">
-                {authMode === "login" ? (
-                  <LockKeyhole className="h-5 w-5 text-blue-200" />
-                ) : (
-                  <UserRoundPlus className="h-5 w-5 text-blue-200" />
-                )}
-              </div>
+            <div className="mt-5 rounded-2xl bg-white/10 p-3">
+              {authMode === "login" ? (
+                <LockKeyhole className="h-5 w-5 text-blue-200" />
+              ) : (
+                <UserRoundPlus className="h-5 w-5 text-blue-200" />
+              )}
             </div>
+          </div>
 
-            {!authState.setupRequired && (
-              <div className="mt-6 flex rounded-2xl bg-white/10 p-1 text-sm">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode("login");
-                    setAuthErrorMessage("");
-                  }}
-                  className={`flex-1 rounded-[1rem] px-4 py-3 font-semibold transition ${
-                    authMode === "login" ? "bg-white text-slate-900" : "text-slate-300"
-                  }`}
-                >
-                  Login
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode("register");
-                    setAuthErrorMessage("");
-                  }}
-                  className={`flex-1 rounded-[1rem] px-4 py-3 font-semibold transition ${
-                    authMode === "register" ? "bg-white text-slate-900" : "text-slate-300"
-                  }`}
-                >
-                  Daftar
-                </button>
-              </div>
-            )}
-
-            {authErrorMessage && (
-              <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-                {authErrorMessage}
-              </div>
-            )}
-
-            <form onSubmit={handleAuthSubmit} className="mt-6 space-y-5">
-              <div>
-                <label className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
-                  Username
-                </label>
-                <input
-                  type="text"
-                  value={authForm.username}
-                  onChange={(event) =>
-                    setAuthForm((current) => ({
-                      ...current,
-                      username: event.target.value,
-                    }))
-                  }
-                  placeholder="admin-gudang"
-                  className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-4 text-white outline-none transition focus:border-blue-300 focus:bg-white/15"
-                  required
-                  minLength={4}
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  value={authForm.password}
-                  onChange={(event) =>
-                    setAuthForm((current) => ({
-                      ...current,
-                      password: event.target.value,
-                    }))
-                  }
-                  placeholder="Minimal 6 karakter"
-                  className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-4 text-white outline-none transition focus:border-blue-300 focus:bg-white/15"
-                  required
-                  minLength={6}
-                />
-              </div>
-
+          {!authState.setupRequired && (
+            <div className="mt-8 flex rounded-2xl bg-white/10 p-1 text-sm">
               <button
-                type="submit"
-                disabled={isSaving}
-                className="w-full rounded-2xl bg-blue-500 px-4 py-4 text-sm font-black uppercase tracking-[0.18em] text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-70"
+                type="button"
+                onClick={() => {
+                  setAuthMode("login");
+                  setAuthErrorMessage("");
+                }}
+                className={`flex-1 rounded-[1rem] px-4 py-3 font-semibold transition ${
+                  authMode === "login" ? "bg-white text-slate-900" : "text-slate-300"
+                }`}
               >
-                {isSaving
-                  ? "Memproses..."
-                  : authMode === "login"
-                    ? "Masuk ke Dashboard"
-                    : "Simpan Akun ke Supabase"}
+                Login
               </button>
-            </form>
-          </section>
-        </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode("register");
+                  setAuthErrorMessage("");
+                }}
+                className={`flex-1 rounded-[1rem] px-4 py-3 font-semibold transition ${
+                  authMode === "register" ? "bg-white text-slate-900" : "text-slate-300"
+                }`}
+              >
+                Daftar
+              </button>
+            </div>
+          )}
+
+          {authErrorMessage && (
+            <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+              {authErrorMessage}
+            </div>
+          )}
+
+          <form onSubmit={handleAuthSubmit} className="mt-6 space-y-5">
+            <div>
+              <label className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
+                Username
+              </label>
+              <input
+                type="text"
+                value={authForm.username}
+                onChange={(event) =>
+                  setAuthForm((current) => ({
+                    ...current,
+                    username: event.target.value,
+                  }))
+                }
+                placeholder="admin-gudang"
+                className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-4 text-white outline-none transition focus:border-blue-300 focus:bg-white/15"
+                required
+                minLength={4}
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
+                Password
+              </label>
+              <input
+                type="password"
+                value={authForm.password}
+                onChange={(event) =>
+                  setAuthForm((current) => ({
+                    ...current,
+                    password: event.target.value,
+                  }))
+                }
+                placeholder="Minimal 6 karakter"
+                className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-4 text-white outline-none transition focus:border-blue-300 focus:bg-white/15"
+                required
+                minLength={6}
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSaving}
+              className="w-full rounded-2xl bg-blue-500 px-4 py-4 text-sm font-black uppercase tracking-[0.18em] text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {isSaving
+                ? "Memproses..."
+                : authMode === "login"
+                  ? "Masuk ke Dashboard"
+                  : "Simpan Akun ke Supabase"}
+            </button>
+          </form>
+        </section>
       </div>
     );
   }
@@ -819,7 +787,6 @@ export default function LogistikSejahteraPage() {
             <h1 className="text-lg font-bold tracking-tight">
               Logistik <span className="text-blue-400">Sejahtera</span>
             </h1>
-            <p className="text-xs text-slate-400">Sistem gudang & distribusi</p>
           </div>
         </div>
 
@@ -894,9 +861,6 @@ export default function LogistikSejahteraPage() {
             <h2 className="text-3xl font-bold leading-tight text-slate-800 md:text-xl">
               {viewTitles[activeView]}
             </h2>
-            <p className="mt-1 max-w-md text-sm leading-relaxed text-slate-400 md:text-xs">
-              Pantau stok gudang, distribusi barang, dan laporan CSV dari satu tampilan.
-            </p>
           </div>
 
           <div className="flex items-center justify-between gap-3 md:justify-end md:gap-4">
@@ -1006,9 +970,9 @@ export default function LogistikSejahteraPage() {
                   </div>
 
                   <div className="mt-6 space-y-4">
-                    {history.slice(0, 5).map((item) => (
+                    {history.slice(0, 5).map((item, index) => (
                       <div
-                        key={`${item.time}-${item.action}`}
+                        key={`${item.time}-${item.action}-${index}`}
                         className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3"
                       >
                         <p className="text-sm font-semibold text-slate-700">{item.action}</p>
@@ -1032,9 +996,6 @@ export default function LogistikSejahteraPage() {
               <div className="hidden rounded-3xl border border-slate-200 bg-white p-6 md:flex md:items-center md:justify-between">
                 <div>
                   <h3 className="text-lg font-bold text-slate-800">Basis Data Gudang</h3>
-                  <p className="text-xs text-slate-500">
-                    Kelola stok gudang utama. Distribusi dilakukan dari tombol kirim.
-                  </p>
                 </div>
                 <button
                   type="button"
@@ -1059,10 +1020,6 @@ export default function LogistikSejahteraPage() {
             <section className="space-y-6">
               <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
                 <h3 className="text-lg font-bold text-slate-800">Daftar Barang Distribusi</h3>
-                <p className="mt-1 text-xs text-slate-500">
-                  Barang yang dipindahkan dari gudang tercatat di sini, termasuk jumlah yang
-                  sudah keluar dari stok gudang.
-                </p>
               </div>
 
               <InventoryPanel
@@ -1130,9 +1087,9 @@ export default function LogistikSejahteraPage() {
                   </p>
                 ) : (
                   <div className="divide-y divide-slate-50">
-                    {history.map((item) => (
+                    {history.map((item, index) => (
                       <div
-                        key={`${item.time}-${item.action}`}
+                        key={`${item.time}-${item.action}-${index}`}
                         className="flex flex-col gap-2 p-4 md:flex-row md:items-center md:justify-between md:px-6"
                       >
                         <p className="font-semibold text-slate-700">{item.action}</p>
@@ -1376,26 +1333,6 @@ export default function LogistikSejahteraPage() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function FeatureCard({
-  icon: Icon,
-  title,
-  description,
-}: {
-  icon: ElementType;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="rounded-[1.5rem] border border-slate-200 bg-slate-50 p-5">
-      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-slate-800 shadow-sm">
-        <Icon className="h-5 w-5" />
-      </div>
-      <h3 className="mt-4 text-base font-bold text-slate-800">{title}</h3>
-      <p className="mt-2 text-sm leading-6 text-slate-500">{description}</p>
     </div>
   );
 }
