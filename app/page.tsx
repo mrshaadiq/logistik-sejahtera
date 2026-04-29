@@ -11,6 +11,7 @@ import {
   Clock,
   History,
   PackagePlus,
+  Pencil,
   ReceiptText,
   Send,
   SlidersHorizontal,
@@ -108,6 +109,7 @@ function ConditionIcon({ type }: { type: ConditionLabel["icon"] }) {
 export default function LogistikSejahteraPage() {
   const [activeView, setActiveView] = useState<ViewId>("ringkasan");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [db, setDb] = useState<InventoryItem[]>(EMPTY_DB);
   const [history, setHistory] = useState<HistoryItem[]>(EMPTY_HISTORY);
   const [isLoading, setIsLoading] = useState(true);
@@ -119,6 +121,36 @@ export default function LogistikSejahteraPage() {
     status: "Gudang" as ItemStatus,
     expired: "",
   });
+  const isEditMode = editingItem !== null;
+
+  const resetForm = () => {
+    setForm({ nama: "", jumlah: "", status: "Gudang", expired: "" });
+    setEditingItem(null);
+  };
+
+  const openCreateModal = () => {
+    setErrorMessage("");
+    resetForm();
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (item: InventoryItem) => {
+    setErrorMessage("");
+    setEditingItem(item);
+    setForm({
+      nama: item.nama,
+      jumlah: item.jumlah.toString(),
+      status: item.status,
+      expired: item.expired,
+    });
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setErrorMessage("");
+    setIsModalOpen(false);
+    resetForm();
+  };
 
   async function parseApiResponse<T>(response: Response): Promise<T> {
     const payload = (await response.json()) as T | { error?: string };
@@ -237,27 +269,43 @@ export default function LogistikSejahteraPage() {
     setErrorMessage("");
 
     try {
-      const response = await fetch("/api/inventory", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      if (isEditMode && !editingItem) {
+        throw new Error("Data barang yang akan diedit tidak ditemukan.");
+      }
+
+      const endpoint =
+        isEditMode && editingItem ? `/api/inventory/${editingItem.id}` : "/api/inventory";
+      const response = await fetch(
+        endpoint,
+        {
+          method: isEditMode ? "PATCH" : "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            nama: form.nama.trim(),
+            jumlah,
+            status: form.status,
+            expired: form.expired,
+          }),
         },
-        body: JSON.stringify({
-          nama: form.nama.trim(),
-          jumlah,
-          status: form.status,
-          expired: form.expired,
-        }),
-      });
+      );
 
-      await parseApiResponse<{ id: number }>(response);
+      if (isEditMode) {
+        await parseApiResponse<{ success: true }>(response);
+      } else {
+        await parseApiResponse<{ id: number }>(response);
+      }
+
       await loadDashboardData();
-
-      setForm({ nama: "", jumlah: "", status: "Gudang", expired: "" });
-      setIsModalOpen(false);
+      closeModal();
     } catch (error) {
       setErrorMessage(
-        error instanceof Error ? error.message : "Gagal menyimpan data barang.",
+        error instanceof Error
+          ? error.message
+          : isEditMode
+            ? "Gagal memperbarui data barang."
+            : "Gagal menyimpan data barang.",
       );
     } finally {
       setIsSaving(false);
@@ -418,7 +466,7 @@ export default function LogistikSejahteraPage() {
             {activeView === "inventori" && (
               <button
                 type="button"
-                onClick={() => setIsModalOpen(true)}
+                onClick={openCreateModal}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-slate-200 transition hover:bg-slate-800 md:hidden"
               >
                 <PackagePlus className="h-4 w-4" />
@@ -489,6 +537,7 @@ export default function LogistikSejahteraPage() {
                 title="Saran Pengeluaran Barang"
                 subtitle="Diurutkan berdasarkan prioritas keselamatan konsumen (FEFO)"
                 items={sortedItems}
+                onEdit={openEditModal}
                 onShip={shipItem}
                 onDelete={deleteItem}
               />
@@ -508,7 +557,7 @@ export default function LogistikSejahteraPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(true)}
+                  onClick={openCreateModal}
                   className="rounded-2xl bg-slate-900 px-6 py-3 text-sm font-bold text-white shadow-xl transition hover:bg-slate-800 active:scale-95"
                 >
                   <PackagePlus className="mr-2 inline h-4 w-4" />
@@ -516,7 +565,12 @@ export default function LogistikSejahteraPage() {
                 </button>
               </div>
 
-              <InventoryPanel items={sortedItems} onShip={shipItem} onDelete={deleteItem} />
+              <InventoryPanel
+                items={sortedItems}
+                onEdit={openEditModal}
+                onShip={shipItem}
+                onDelete={deleteItem}
+              />
             </section>
           )}
 
@@ -617,17 +671,21 @@ export default function LogistikSejahteraPage() {
           <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-t-[2rem] bg-white shadow-2xl md:rounded-[2rem]">
             <div className="bg-slate-900 p-6 text-white md:p-8">
               <div className="mb-1 flex items-center justify-between">
-                <h3 className="text-xl font-bold md:text-2xl">Input Inventori</h3>
+                <h3 className="text-xl font-bold md:text-2xl">
+                  {isEditMode ? "Edit Inventori" : "Input Inventori"}
+                </h3>
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={closeModal}
                   className="text-slate-400 transition hover:text-white"
                 >
                   <X className="h-6 w-6" />
                 </button>
               </div>
               <p className="text-xs text-slate-400">
-                Pastikan data sesuai dengan fisik gudang.
+                {isEditMode
+                  ? "Perbarui data barang untuk memperbaiki kesalahan input."
+                  : "Pastikan data sesuai dengan fisik gudang."}
               </p>
             </div>
 
@@ -712,7 +770,13 @@ export default function LogistikSejahteraPage() {
                 disabled={isSaving}
                 className="mt-4 w-full rounded-2xl bg-blue-600 py-5 font-bold text-white shadow-xl shadow-blue-200 transition hover:bg-blue-700 active:scale-95"
               >
-                {isSaving ? "MENYIMPAN..." : "SIMPAN KE DATABASE"}
+                {isSaving
+                  ? isEditMode
+                    ? "MEMPERBARUI..."
+                    : "MENYIMPAN..."
+                  : isEditMode
+                    ? "SIMPAN PERUBAHAN"
+                    : "SIMPAN KE DATABASE"}
               </button>
             </form>
           </div>
@@ -762,12 +826,14 @@ function InventoryPanel({
   title,
   subtitle,
   items,
+  onEdit,
   onShip,
   onDelete,
 }: {
   title?: string;
   subtitle?: string;
   items: InventoryItem[];
+  onEdit: (item: InventoryItem) => void;
   onShip: (id: number) => void;
   onDelete: (id: number) => void;
 }) {
@@ -843,6 +909,15 @@ function InventoryPanel({
                   </div>
 
                   <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onEdit(item)}
+                      className="flex items-center justify-center gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700 transition hover:bg-amber-500 hover:text-white"
+                    >
+                      <Pencil className="h-4 w-4" />
+                      Edit
+                    </button>
+
                     {isInWarehouse && (
                       <button
                         type="button"
@@ -931,6 +1006,15 @@ function InventoryPanel({
 
                     <td className="px-6 py-5 text-right">
                       <div className="flex justify-end gap-2 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
+                        <button
+                          type="button"
+                          onClick={() => onEdit(item)}
+                          className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-600 transition hover:bg-amber-500 hover:text-white"
+                          title="Edit barang"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+
                         {isInWarehouse && (
                           <button
                             type="button"

@@ -11,7 +11,10 @@ type InventoryRouteContext = {
 };
 
 type UpdateInventoryPayload = {
+  nama?: string;
+  jumlah?: number;
   status?: ItemStatus;
+  expired?: string;
 };
 
 async function getItemName(id: number) {
@@ -38,24 +41,90 @@ export async function PATCH(request: Request, context: InventoryRouteContext) {
     }
 
     const body = (await request.json()) as UpdateInventoryPayload;
-    const status = body.status;
+    const updates: {
+      nama?: string;
+      jumlah?: number;
+      status?: ItemStatus;
+      expired_at?: string;
+    } = {};
 
-    if (status !== "Gudang" && status !== "Distribusi") {
-      return NextResponse.json({ error: "Status barang tidak valid." }, { status: 400 });
+    if (body.nama !== undefined) {
+      const nama = body.nama.trim();
+
+      if (!nama) {
+        return NextResponse.json(
+          { error: "Nama barang tidak boleh kosong." },
+          { status: 400 },
+        );
+      }
+
+      updates.nama = nama;
+    }
+
+    if (body.jumlah !== undefined) {
+      const jumlah = Number(body.jumlah);
+
+      if (Number.isNaN(jumlah) || jumlah <= 0) {
+        return NextResponse.json(
+          { error: "Jumlah barang harus lebih dari 0." },
+          { status: 400 },
+        );
+      }
+
+      updates.jumlah = jumlah;
+    }
+
+    if (body.status !== undefined) {
+      if (body.status !== "Gudang" && body.status !== "Distribusi") {
+        return NextResponse.json(
+          { error: "Status barang tidak valid." },
+          { status: 400 },
+        );
+      }
+
+      updates.status = body.status;
+    }
+
+    if (body.expired !== undefined) {
+      if (!body.expired) {
+        return NextResponse.json(
+          { error: "Tanggal kedaluwarsa wajib diisi." },
+          { status: 400 },
+        );
+      }
+
+      updates.expired_at = body.expired;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json(
+        { error: "Tidak ada data yang dikirim untuk diperbarui." },
+        { status: 400 },
+      );
     }
 
     const itemName = await getItemName(id);
 
     const { error } = await supabaseAdmin
       .from("inventory_items")
-      .update({ status })
+      .update(updates)
       .eq("id", id);
 
     if (error) {
       throw new Error(`Failed to update inventory item: ${error.message}`);
     }
 
-    await createHistoryLog(`Barang [${itemName}] dipindahkan ke ${status}`);
+    if (
+      Object.keys(updates).length === 1 &&
+      updates.status !== undefined &&
+      body.nama === undefined &&
+      body.jumlah === undefined &&
+      body.expired === undefined
+    ) {
+      await createHistoryLog(`Barang [${itemName}] dipindahkan ke ${updates.status}`);
+    } else {
+      await createHistoryLog(`Perubahan data barang: ${itemName}`);
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {
