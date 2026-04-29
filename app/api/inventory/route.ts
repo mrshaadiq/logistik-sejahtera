@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { requireAuth } from "@/lib/auth";
 import { createHistoryLog, listInventoryItems } from "@/lib/logistics-data";
 import type { ItemStatus } from "@/lib/logistics-types";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -13,6 +14,11 @@ type CreateInventoryPayload = {
 
 export async function GET() {
   try {
+    const auth = await requireAuth();
+    if (auth instanceof NextResponse) {
+      return auth;
+    }
+
     const items = await listInventoryItems();
     return NextResponse.json(items);
   } catch (error) {
@@ -24,10 +30,15 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const auth = await requireAuth();
+    if (auth instanceof NextResponse) {
+      return auth;
+    }
+
     const body = (await request.json()) as CreateInventoryPayload;
     const nama = body.nama?.trim();
     const jumlah = Number(body.jumlah);
-    const status = body.status;
+    const status = body.status ?? "Gudang";
     const expired = body.expired;
 
     if (!nama || Number.isNaN(jumlah) || jumlah <= 0 || !expired) {

@@ -22,7 +22,7 @@ type HistoryRow = {
 
 type DistributionRow = {
   id: number;
-  inventory_item_id: number;
+  inventory_item_id: number | null;
   nama: string;
   jumlah: number;
   status: ItemStatus;
@@ -106,6 +106,20 @@ export async function getInventoryItemById(id: number) {
   return mapInventoryRow(data as InventoryRow);
 }
 
+export async function getInventoryItemRowById(id: number) {
+  const { data, error } = await supabaseAdmin
+    .from("inventory_items")
+    .select("id,nama,jumlah,status,expired_at,created_at")
+    .eq("id", id)
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to load inventory item: ${error.message}`);
+  }
+
+  return data as InventoryRow;
+}
+
 export async function listHistoryLogs() {
   const { data, error } = await supabaseAdmin
     .from("history_logs")
@@ -146,43 +160,90 @@ export async function listDistributionItems() {
   return (data ?? []).map((row) => mapDistributionRow(row as DistributionRow));
 }
 
-export async function syncDistributionItem(item: InventoryItem) {
-  const { error } = await supabaseAdmin.from("distribution_items").upsert(
-    {
-      inventory_item_id: item.id,
+export async function createOrUpdateDistributionItem(item: {
+  inventoryItemId: number | null;
+  nama: string;
+  jumlah: number;
+  expired: string;
+}) {
+  if (item.inventoryItemId === null) {
+    const { error } = await supabaseAdmin.from("distribution_items").insert({
+      inventory_item_id: null,
       nama: item.nama,
       jumlah: item.jumlah,
-      status: item.status,
+      status: "Distribusi",
       expired_at: item.expired,
       source_location: "Gudang Utama",
       queue_status: "Menunggu Distribusi",
       distributed_at: new Date().toISOString(),
-    },
-    {
-      onConflict: "inventory_item_id",
-    },
-  );
+    });
 
-  if (error) {
-    if (isMissingDistributionTable(error)) {
-      return;
+    if (error) {
+      if (isMissingDistributionTable(error)) {
+        return;
+      }
+
+      throw new Error(`Failed to create distribution item: ${error.message}`);
     }
 
-    throw new Error(`Failed to sync distribution item: ${error.message}`);
+    return;
   }
-}
 
-export async function removeDistributionItem(inventoryItemId: number) {
-  const { error } = await supabaseAdmin
+  const { data: existing, error: existingError } = await supabaseAdmin
     .from("distribution_items")
-    .delete()
-    .eq("inventory_item_id", inventoryItemId);
+    .select("id,jumlah")
+    .eq("inventory_item_id", item.inventoryItemId)
+    .maybeSingle();
+
+  if (existingError) {
+    if (isMissingDistributionTable(existingError)) {
+      return;
+    }
+
+    throw new Error(`Failed to load distribution item: ${existingError.message}`);
+  }
+
+  if (existing) {
+    const { error } = await supabaseAdmin
+      .from("distribution_items")
+      .update({
+        jumlah: Number(existing.jumlah) + item.jumlah,
+        nama: item.nama,
+        status: "Distribusi",
+        expired_at: item.expired,
+        source_location: "Gudang Utama",
+        queue_status: "Menunggu Distribusi",
+        distributed_at: new Date().toISOString(),
+      })
+      .eq("id", existing.id);
+
+    if (error) {
+      if (isMissingDistributionTable(error)) {
+        return;
+      }
+
+      throw new Error(`Failed to update distribution item: ${error.message}`);
+    }
+
+    return;
+  }
+
+  const { error } = await supabaseAdmin.from("distribution_items").insert({
+    inventory_item_id: item.inventoryItemId,
+    nama: item.nama,
+    jumlah: item.jumlah,
+    status: "Distribusi",
+    expired_at: item.expired,
+    source_location: "Gudang Utama",
+    queue_status: "Menunggu Distribusi",
+    distributed_at: new Date().toISOString(),
+  });
 
   if (error) {
     if (isMissingDistributionTable(error)) {
       return;
     }
 
-    throw new Error(`Failed to delete distribution item: ${error.message}`);
+    throw new Error(`Failed to create distribution item: ${error.message}`);
   }
 }

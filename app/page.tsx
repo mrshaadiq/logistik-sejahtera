@@ -1,24 +1,29 @@
 "use client";
 
 import type { ElementType, FormEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Boxes,
   CalendarX,
   ChartPie,
   CheckCircle2,
-  Clock,
+  Download,
+  FileSpreadsheet,
   Filter,
   History,
+  LockKeyhole,
+  LogOut,
   PackagePlus,
   Pencil,
   ReceiptText,
   Search,
   Send,
+  ShieldCheck,
   SlidersHorizontal,
   Trash2,
   Truck,
+  UserRoundPlus,
   Warehouse,
   X,
   XCircle,
@@ -28,11 +33,17 @@ import type {
   DistributionItem,
   HistoryItem,
   InventoryItem,
-  ItemStatus,
 } from "@/lib/logistics-types";
 
-type ViewId = "ringkasan" | "inventori" | "distribusi" | "riwayat" | "pengaturan";
+type ViewId =
+  | "ringkasan"
+  | "inventori"
+  | "distribusi"
+  | "laporan"
+  | "riwayat"
+  | "pengaturan";
 type ExpiryFilter = "all" | "safe" | "near" | "expired" | "critical";
+type AuthMode = "login" | "register";
 
 type ConditionLabel = {
   text: string;
@@ -48,6 +59,35 @@ type SearchMetadata = {
   lokasi: string;
 };
 
+type AuthSessionPayload = {
+  authenticated: boolean;
+  setupRequired: boolean;
+  user: {
+    userId: number;
+    username: string;
+  } | null;
+};
+
+type AuthState =
+  | {
+      status: "loading";
+      setupRequired: boolean;
+      user: null;
+    }
+  | {
+      status: "unauthenticated";
+      setupRequired: boolean;
+      user: null;
+    }
+  | {
+      status: "authenticated";
+      setupRequired: boolean;
+      user: {
+        userId: number;
+        username: string;
+      };
+    };
+
 const EMPTY_DB: InventoryItem[] = [];
 const EMPTY_DISTRIBUTION: DistributionItem[] = [];
 const EMPTY_HISTORY: HistoryItem[] = [];
@@ -56,6 +96,7 @@ const primaryNavItems: Array<{ id: ViewId; label: string; mobileLabel: string; i
   { id: "ringkasan", label: "Ringkasan Utama", mobileLabel: "Ringkas", icon: ChartPie },
   { id: "inventori", label: "Manajemen Stok", mobileLabel: "Stok", icon: Warehouse },
   { id: "distribusi", label: "Distribusi", mobileLabel: "Distribusi", icon: Truck },
+  { id: "laporan", label: "Laporan CSV", mobileLabel: "Laporan", icon: FileSpreadsheet },
   { id: "riwayat", label: "Log Transaksi", mobileLabel: "Riwayat", icon: ReceiptText },
 ];
 const settingsNavItem = {
@@ -70,9 +111,38 @@ const viewTitles: Record<ViewId, string> = {
   ringkasan: "Ringkasan Utama",
   inventori: "Manajemen Stok",
   distribusi: "Distribusi Barang",
+  laporan: "Laporan CSV",
   riwayat: "Log Transaksi",
   pengaturan: "Pengaturan",
 };
+
+class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+async function parseApiResponse<T>(response: Response): Promise<T> {
+  const payload = (await response.json().catch(() => null)) as T | { error?: string } | null;
+
+  if (!response.ok) {
+    const message =
+      typeof payload === "object" &&
+      payload !== null &&
+      "error" in payload &&
+      typeof payload.error === "string"
+        ? payload.error
+        : "Permintaan ke server gagal.";
+
+    throw new ApiError(message, response.status);
+  }
+
+  return payload as T;
+}
 
 function getTodayStart() {
   const today = new Date();
@@ -186,25 +256,46 @@ function getItemMetadata(item: InventoryItem): SearchMetadata {
 
 export default function LogistikSejahteraPage() {
   const [activeView, setActiveView] = useState<ViewId>("ringkasan");
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [authState, setAuthState] = useState<AuthState>({
+    status: "loading",
+    setupRequired: false,
+    user: null,
+  });
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDistributionModalOpen, setIsDistributionModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+  const [distributionTarget, setDistributionTarget] = useState<InventoryItem | null>(null);
   const [db, setDb] = useState<InventoryItem[]>(EMPTY_DB);
   const [distribution, setDistribution] = useState<DistributionItem[]>(EMPTY_DISTRIBUTION);
   const [history, setHistory] = useState<HistoryItem[]>(EMPTY_HISTORY);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [authErrorMessage, setAuthErrorMessage] = useState("");
   const [form, setForm] = useState({
     nama: "",
     jumlah: "",
-    status: "Gudang" as ItemStatus,
     expired: "",
+  });
+  const [distributionForm, setDistributionForm] = useState({
+    quantity: "1",
+  });
+  const [authForm, setAuthForm] = useState({
+    username: "",
+    password: "",
   });
   const isEditMode = editingItem !== null;
 
   const resetForm = () => {
-    setForm({ nama: "", jumlah: "", status: "Gudang", expired: "" });
+    setForm({ nama: "", jumlah: "", expired: "" });
     setEditingItem(null);
+  };
+
+  const closeModal = () => {
+    setErrorMessage("");
+    setIsModalOpen(false);
+    resetForm();
   };
 
   const openCreateModal = () => {
@@ -219,36 +310,43 @@ export default function LogistikSejahteraPage() {
     setForm({
       nama: item.nama,
       jumlah: item.jumlah.toString(),
-      status: item.status,
       expired: item.expired,
     });
     setIsModalOpen(true);
   };
 
-  const closeModal = () => {
+  const closeDistributionModal = () => {
+    setDistributionTarget(null);
+    setDistributionForm({ quantity: "1" });
     setErrorMessage("");
-    setIsModalOpen(false);
-    resetForm();
+    setIsDistributionModalOpen(false);
   };
 
-  async function parseApiResponse<T>(response: Response): Promise<T> {
-    const payload = (await response.json()) as T | { error?: string };
+  const openDistributionModal = (item: InventoryItem) => {
+    setDistributionTarget(item);
+    setDistributionForm({ quantity: String(Math.max(1, Math.min(item.jumlah, 1))) });
+    setErrorMessage("");
+    setIsDistributionModalOpen(true);
+  };
 
-    if (!response.ok) {
-      const message =
-        typeof payload === "object" &&
-        payload !== null &&
-        "error" in payload &&
-        typeof payload.error === "string"
-          ? payload.error
-          : "Permintaan ke server gagal.";
-      throw new Error(message);
-    }
+  const applyUnauthenticatedState = useCallback((setupRequired: boolean) => {
+    setAuthState({
+      status: "unauthenticated",
+      setupRequired,
+      user: null,
+    });
+    setDb([]);
+    setDistribution([]);
+    setHistory([]);
+    setIsLoading(false);
+  }, []);
 
-    return payload as T;
-  }
+  const loadSession = useCallback(async () => {
+    const response = await fetch("/api/auth/session", { cache: "no-store" });
+    return parseApiResponse<AuthSessionPayload>(response);
+  }, []);
 
-  async function loadDashboardData() {
+  const loadDashboardData = useCallback(async () => {
     const [inventoryResponse, distributionResponse, historyResponse] = await Promise.all([
       fetch("/api/inventory", { cache: "no-store" }),
       fetch("/api/distribution", { cache: "no-store" }),
@@ -264,56 +362,51 @@ export default function LogistikSejahteraPage() {
     setDb(inventoryData);
     setDistribution(distributionData);
     setHistory(historyData);
-  }
+  }, []);
+
+  const initializeApp = useCallback(async () => {
+    setIsLoading(true);
+
+    try {
+      const sessionPayload = await loadSession();
+
+      if (!sessionPayload.authenticated || !sessionPayload.user) {
+        applyUnauthenticatedState(sessionPayload.setupRequired);
+        setAuthMode(sessionPayload.setupRequired ? "register" : "login");
+        return;
+      }
+
+      setAuthState({
+        status: "authenticated",
+        setupRequired: sessionPayload.setupRequired,
+        user: sessionPayload.user,
+      });
+
+      await loadDashboardData();
+      setErrorMessage("");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        applyUnauthenticatedState(false);
+        return;
+      }
+
+      setErrorMessage(
+        error instanceof Error ? error.message : "Gagal memuat dashboard.",
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [applyUnauthenticatedState, loadDashboardData, loadSession]);
 
   useEffect(() => {
-    let isMounted = true;
-
-    const initializeDashboard = async () => {
-      setIsLoading(true);
-      setErrorMessage("");
-
-      try {
-        const [inventoryResponse, distributionResponse, historyResponse] = await Promise.all([
-          fetch("/api/inventory", { cache: "no-store" }),
-          fetch("/api/distribution", { cache: "no-store" }),
-          fetch("/api/history", { cache: "no-store" }),
-        ]);
-
-        const [inventoryData, distributionData, historyData] = await Promise.all([
-          parseApiResponse<InventoryItem[]>(inventoryResponse),
-          parseApiResponse<DistributionItem[]>(distributionResponse),
-          parseApiResponse<HistoryItem[]>(historyResponse),
-        ]);
-
-        if (!isMounted) {
-          return;
-        }
-
-        setDb(inventoryData);
-        setDistribution(distributionData);
-        setHistory(historyData);
-      } catch (error) {
-        if (!isMounted) {
-          return;
-        }
-
-        setErrorMessage(
-          error instanceof Error ? error.message : "Gagal memuat data dashboard.",
-        );
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    void initializeDashboard();
+    const timeoutId = window.setTimeout(() => {
+      void initializeApp();
+    }, 0);
 
     return () => {
-      isMounted = false;
+      window.clearTimeout(timeoutId);
     };
-  }, []);
+  }, [initializeApp]);
 
   const sortedItems = useMemo(() => {
     return [...db].sort((a, b) => {
@@ -329,33 +422,82 @@ export default function LogistikSejahteraPage() {
   }, [db]);
 
   const distributionInventoryItems = useMemo<InventoryItem[]>(() => {
-    if (distribution.length > 0) {
-      return distribution.map((item) => ({
-        id: item.inventoryItemId,
-        nama: item.nama,
-        jumlah: item.jumlah,
-        status: item.status,
-        expired: item.expired,
-        created: item.distributedAt,
-      }));
-    }
-
-    return db.filter((item) => item.status === "Distribusi");
-  }, [db, distribution]);
+    return distribution.map((item) => ({
+      id: item.id,
+      nama: item.nama,
+      jumlah: item.jumlah,
+      status: "Distribusi",
+      expired: item.expired,
+      created: item.distributedAt,
+    }));
+  }, [distribution]);
 
   const stats = useMemo(() => {
     return db.reduce(
       (acc, item) => {
         const label = getConditionLabel(item.expired);
         acc.total += item.jumlah;
-        if (item.status === "Distribusi") acc.dist += 1;
         if (label.priority === 1) acc.expired += 1;
         if (label.priority === 2) acc.near += 1;
+        if (isCriticalStock(item.jumlah)) acc.critical += 1;
         return acc;
       },
-      { total: 0, near: 0, expired: 0, dist: 0 },
+      { total: 0, near: 0, expired: 0, critical: 0 },
     );
   }, [db]);
+
+  async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSaving(true);
+    setAuthErrorMessage("");
+
+    try {
+      const response = await fetch(
+        authMode === "login" ? "/api/auth/login" : "/api/auth/register",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            username: authForm.username.trim(),
+            password: authForm.password,
+          }),
+        },
+      );
+
+      await parseApiResponse<{ success: true }>(response);
+      setAuthForm({ username: "", password: "" });
+      await initializeApp();
+    } catch (error) {
+      setAuthErrorMessage(
+        error instanceof Error ? error.message : "Gagal memproses autentikasi.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleLogout() {
+    setIsSaving(true);
+    setErrorMessage("");
+
+    try {
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+      });
+
+      await parseApiResponse<{ success: true }>(response);
+      applyUnauthenticatedState(false);
+      setAuthMode("login");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Gagal logout dari sistem.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -375,31 +517,28 @@ export default function LogistikSejahteraPage() {
 
       const endpoint =
         isEditMode && editingItem ? `/api/inventory/${editingItem.id}` : "/api/inventory";
-      const response = await fetch(
-        endpoint,
-        {
-          method: isEditMode ? "PATCH" : "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            nama: form.nama.trim(),
-            jumlah,
-            status: form.status,
-            expired: form.expired,
-          }),
+      const response = await fetch(endpoint, {
+        method: isEditMode ? "PATCH" : "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      );
+        body: JSON.stringify({
+          nama: form.nama.trim(),
+          jumlah,
+          expired: form.expired,
+          status: "Gudang",
+        }),
+      });
 
-      if (isEditMode) {
-        await parseApiResponse<{ success: true }>(response);
-      } else {
-        await parseApiResponse<{ id: number }>(response);
-      }
-
+      await parseApiResponse<{ success?: true; id?: number }>(response);
       await loadDashboardData();
       closeModal();
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        applyUnauthenticatedState(false);
+        return;
+      }
+
       setErrorMessage(
         error instanceof Error
           ? error.message
@@ -412,23 +551,44 @@ export default function LogistikSejahteraPage() {
     }
   };
 
-  const shipItem = async (id: number) => {
+  const submitDistribution = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!distributionTarget) {
+      return;
+    }
+
+    const quantity = Number.parseInt(distributionForm.quantity, 10);
+    if (Number.isNaN(quantity) || quantity <= 0) {
+      setErrorMessage("Jumlah distribusi tidak valid.");
+      return;
+    }
+
     setIsSaving(true);
     setErrorMessage("");
 
     try {
-      const response = await fetch(`/api/inventory/${id}`, {
-        method: "PATCH",
+      const response = await fetch("/api/distribution", {
+        method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ status: "Distribusi" }),
+        body: JSON.stringify({
+          inventoryItemId: distributionTarget.id,
+          quantity,
+        }),
       });
 
       await parseApiResponse<{ success: true }>(response);
       await loadDashboardData();
+      closeDistributionModal();
       setActiveView("distribusi");
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        applyUnauthenticatedState(false);
+        return;
+      }
+
       setErrorMessage(
         error instanceof Error ? error.message : "Gagal memindahkan barang.",
       );
@@ -449,6 +609,11 @@ export default function LogistikSejahteraPage() {
       await parseApiResponse<{ success: true }>(response);
       await loadDashboardData();
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        applyUnauthenticatedState(false);
+        return;
+      }
+
       setErrorMessage(
         error instanceof Error ? error.message : "Gagal menghapus barang.",
       );
@@ -459,7 +624,7 @@ export default function LogistikSejahteraPage() {
 
   const clearAllData = async () => {
     const isConfirmed = window.confirm(
-      "PERINGATAN: Semua data akan dihapus permanen. Lanjutkan?",
+      "PERINGATAN: Semua data inventori, distribusi, dan riwayat akan dihapus. Lanjutkan?",
     );
 
     if (!isConfirmed) return;
@@ -477,6 +642,11 @@ export default function LogistikSejahteraPage() {
       setDistribution([]);
       setHistory([]);
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        applyUnauthenticatedState(false);
+        return;
+      }
+
       setErrorMessage(
         error instanceof Error ? error.message : "Gagal menghapus semua data.",
       );
@@ -485,6 +655,159 @@ export default function LogistikSejahteraPage() {
     }
   };
 
+  function downloadReport(type: "inventory" | "distribution" | "history") {
+    window.location.href = `/api/report?type=${type}`;
+  }
+
+  if (authState.status !== "authenticated") {
+    return (
+      <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#eff6ff_30%,_#f8fafc_100%)] px-4 py-10 text-slate-900 sm:px-6 lg:px-8">
+        <div className="mx-auto grid max-w-6xl gap-8 lg:grid-cols-[1.15fr_0.85fr]">
+          <section className="rounded-[2rem] border border-white/70 bg-white/80 p-8 shadow-xl shadow-blue-100 backdrop-blur md:p-10">
+            <div className="inline-flex items-center gap-3 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white">
+              <Boxes className="h-4 w-4" />
+              Logistik Sejahtera
+            </div>
+            <h1 className="mt-6 max-w-xl text-4xl font-black tracking-tight text-slate-900">
+              Login gudang, distribusi, dan laporan CSV dalam satu dashboard.
+            </h1>
+            <p className="mt-4 max-w-2xl text-base leading-8 text-slate-600">
+              Akun disimpan di Supabase, sesi diamankan dengan cookie HTTP-only, dan
+              distribusi sekarang otomatis mengurangi stok di gudang.
+            </p>
+
+            <div className="mt-8 grid gap-4 md:grid-cols-3">
+              <FeatureCard
+                icon={ShieldCheck}
+                title="Akses Terkontrol"
+                description="Username dan password tersimpan di database Supabase dengan hash."
+              />
+              <FeatureCard
+                icon={Truck}
+                title="Stok Berkurang Otomatis"
+                description="Saat barang masuk distribusi, jumlah stok gudang langsung dipotong."
+              />
+              <FeatureCard
+                icon={FileSpreadsheet}
+                title="Ekspor CSV"
+                description="Laporan inventori, distribusi, dan riwayat siap diunduh kapan saja."
+              />
+            </div>
+          </section>
+
+          <section className="rounded-[2rem] border border-slate-200 bg-slate-950 p-6 text-white shadow-2xl shadow-slate-300 md:p-8">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.3em] text-blue-300">
+                  Portal Admin
+                </p>
+                <h2 className="mt-3 text-2xl font-bold">
+                  {authState.setupRequired ? "Buat akun pertama" : "Masuk ke dashboard"}
+                </h2>
+              </div>
+              <div className="rounded-2xl bg-white/10 p-3">
+                {authMode === "login" ? (
+                  <LockKeyhole className="h-5 w-5 text-blue-200" />
+                ) : (
+                  <UserRoundPlus className="h-5 w-5 text-blue-200" />
+                )}
+              </div>
+            </div>
+
+            {!authState.setupRequired && (
+              <div className="mt-6 flex rounded-2xl bg-white/10 p-1 text-sm">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("login");
+                    setAuthErrorMessage("");
+                  }}
+                  className={`flex-1 rounded-[1rem] px-4 py-3 font-semibold transition ${
+                    authMode === "login" ? "bg-white text-slate-900" : "text-slate-300"
+                  }`}
+                >
+                  Login
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("register");
+                    setAuthErrorMessage("");
+                  }}
+                  className={`flex-1 rounded-[1rem] px-4 py-3 font-semibold transition ${
+                    authMode === "register" ? "bg-white text-slate-900" : "text-slate-300"
+                  }`}
+                >
+                  Daftar
+                </button>
+              </div>
+            )}
+
+            {authErrorMessage && (
+              <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                {authErrorMessage}
+              </div>
+            )}
+
+            <form onSubmit={handleAuthSubmit} className="mt-6 space-y-5">
+              <div>
+                <label className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
+                  Username
+                </label>
+                <input
+                  type="text"
+                  value={authForm.username}
+                  onChange={(event) =>
+                    setAuthForm((current) => ({
+                      ...current,
+                      username: event.target.value,
+                    }))
+                  }
+                  placeholder="admin-gudang"
+                  className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-4 text-white outline-none transition focus:border-blue-300 focus:bg-white/15"
+                  required
+                  minLength={4}
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  value={authForm.password}
+                  onChange={(event) =>
+                    setAuthForm((current) => ({
+                      ...current,
+                      password: event.target.value,
+                    }))
+                  }
+                  placeholder="Minimal 6 karakter"
+                  className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-4 text-white outline-none transition focus:border-blue-300 focus:bg-white/15"
+                  required
+                  minLength={6}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="w-full rounded-2xl bg-blue-500 px-4 py-4 text-sm font-black uppercase tracking-[0.18em] text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {isSaving
+                  ? "Memproses..."
+                  : authMode === "login"
+                    ? "Masuk ke Dashboard"
+                    : "Simpan Akun ke Supabase"}
+              </button>
+            </form>
+          </section>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-900 md:flex">
       <aside className="hidden w-72 flex-col border-r border-slate-800 bg-slate-900 p-6 text-white md:flex">
@@ -492,9 +815,12 @@ export default function LogistikSejahteraPage() {
           <div className="rounded-lg bg-blue-500 p-2">
             <Boxes className="h-6 w-6" />
           </div>
-          <h1 className="text-lg font-bold tracking-tight">
-            Logistik <span className="text-blue-400">Sejahtera</span>
-          </h1>
+          <div>
+            <h1 className="text-lg font-bold tracking-tight">
+              Logistik <span className="text-blue-400">Sejahtera</span>
+            </h1>
+            <p className="text-xs text-slate-400">Sistem gudang & distribusi</p>
+          </div>
         </div>
 
         <nav className="flex-1 space-y-1">
@@ -520,7 +846,7 @@ export default function LogistikSejahteraPage() {
           })}
         </nav>
 
-        <div className="border-t border-slate-800 pt-6">
+        <div className="space-y-3 border-t border-slate-800 pt-6">
           <button
             type="button"
             onClick={() => setActiveView("pengaturan")}
@@ -532,6 +858,15 @@ export default function LogistikSejahteraPage() {
           >
             <SlidersHorizontal className="h-5 w-5" />
             Pengaturan
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void handleLogout()}
+            className="flex w-full items-center gap-3 rounded-xl p-3 text-sm font-medium text-slate-400 transition hover:bg-slate-800 hover:text-white"
+          >
+            <LogOut className="h-5 w-5" />
+            Logout
           </button>
         </div>
       </aside>
@@ -550,8 +885,8 @@ export default function LogistikSejahteraPage() {
                 <p className="mt-1 text-[11px] text-slate-400">Dashboard gudang</p>
               </div>
             </div>
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-blue-600 to-blue-400 font-bold text-white shadow-md shadow-blue-100">
-              IC
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-blue-600 to-blue-400 font-bold uppercase text-white shadow-md shadow-blue-100">
+              {authState.user.username.slice(0, 2)}
             </div>
           </div>
 
@@ -560,7 +895,7 @@ export default function LogistikSejahteraPage() {
               {viewTitles[activeView]}
             </h2>
             <p className="mt-1 max-w-md text-sm leading-relaxed text-slate-400 md:text-xs">
-              Pantau stok, expired, dan distribusi barang dari satu tampilan.
+              Pantau stok gudang, distribusi barang, dan laporan CSV dari satu tampilan.
             </p>
           </div>
 
@@ -569,20 +904,32 @@ export default function LogistikSejahteraPage() {
               <button
                 type="button"
                 onClick={openCreateModal}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-slate-200 transition hover:bg-slate-800 md:hidden"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-slate-200 transition hover:bg-slate-800 md:w-auto"
               >
                 <PackagePlus className="h-4 w-4" />
                 Input Stok
+              </button>
+            )}
+            {activeView === "laporan" && (
+              <button
+                type="button"
+                onClick={() => downloadReport("inventory")}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-100 transition hover:bg-emerald-600 md:w-auto"
+              >
+                <Download className="h-4 w-4" />
+                Export Inventori
               </button>
             )}
             <div className="mr-0 hidden text-right sm:block md:mr-4">
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
                 Admin Gudang
               </p>
-              <p className="text-sm font-semibold text-slate-700">Icad Design</p>
+              <p className="text-sm font-semibold text-slate-700">
+                {authState.user.username}
+              </p>
             </div>
-            <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-blue-600 to-blue-400 font-bold text-white shadow-md shadow-blue-100 md:flex">
-              IC
+            <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-blue-600 to-blue-400 font-bold uppercase text-white shadow-md shadow-blue-100 md:flex">
+              {authState.user.username.slice(0, 2)}
             </div>
           </div>
         </header>
@@ -601,18 +948,18 @@ export default function LogistikSejahteraPage() {
           )}
 
           {activeView === "ringkasan" && (
-            <section className="animate-[fadeIn_0.3s_ease-in] space-y-8">
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <section className="space-y-8">
+              <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
                 <StatCard
-                  title="Total Unit Stok"
+                  title="Total Unit Stok Gudang"
                   value={stats.total.toLocaleString("id-ID")}
                   icon={Boxes}
                   iconClassName="bg-blue-50 text-blue-600"
                 />
                 <StatCard
-                  title="Mendekati Expired"
-                  value={stats.near.toString()}
-                  icon={Clock}
+                  title="Stok Kritis"
+                  value={stats.critical.toString()}
+                  icon={AlertTriangle}
                   className="border-l-4 border-l-amber-500"
                   iconClassName="bg-amber-50 text-amber-600"
                   textClassName="text-amber-600"
@@ -626,8 +973,8 @@ export default function LogistikSejahteraPage() {
                   textClassName="text-red-600"
                 />
                 <StatCard
-                  title="Distribusi Aktif"
-                  value={stats.dist.toString()}
+                  title="Item di Distribusi"
+                  value={distribution.length.toString()}
                   icon={Truck}
                   className="border-l-4 border-l-emerald-500"
                   iconClassName="bg-emerald-50 text-emerald-600"
@@ -635,71 +982,143 @@ export default function LogistikSejahteraPage() {
                 />
               </div>
 
-              <InventoryPanel
-                title="Saran Pengeluaran Barang"
-                subtitle="Diurutkan berdasarkan prioritas keselamatan konsumen (FEFO)"
-                items={sortedItems}
-                onEdit={openEditModal}
-                onShip={shipItem}
-                onDelete={deleteItem}
-              />
+              <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+                <InventoryPanel
+                  title="Prioritas Gudang"
+                  subtitle="Urutan stok berdasarkan FEFO dan kondisi kedaluwarsa"
+                  items={sortedItems.slice(0, 6)}
+                  onEdit={openEditModal}
+                  onShip={openDistributionModal}
+                  onDelete={deleteItem}
+                />
+
+                <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-2xl bg-slate-100 p-3 text-slate-700">
+                      <History className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-800">Aktivitas Terkini</h3>
+                      <p className="text-xs text-slate-400">
+                        Ringkasan perubahan terbaru dari sistem gudang
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 space-y-4">
+                    {history.slice(0, 5).map((item) => (
+                      <div
+                        key={`${item.time}-${item.action}`}
+                        className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3"
+                      >
+                        <p className="text-sm font-semibold text-slate-700">{item.action}</p>
+                        <p className="mt-1 text-[11px] text-slate-400">{item.time}</p>
+                      </div>
+                    ))}
+
+                    {history.length === 0 && (
+                      <p className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm italic text-slate-400">
+                        Belum ada log aktivitas.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
             </section>
           )}
 
           {activeView === "inventori" && (
-            <section className="animate-[fadeIn_0.3s_ease-in] space-y-6">
-              <div className="hidden flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-6 md:flex md:flex-row md:items-center md:justify-between">
+            <section className="space-y-6">
+              <div className="hidden rounded-3xl border border-slate-200 bg-white p-6 md:flex md:items-center md:justify-between">
                 <div>
-                  <h3 className="text-lg font-bold text-slate-800">
-                    Basis Data Gudang
-                  </h3>
+                  <h3 className="text-lg font-bold text-slate-800">Basis Data Gudang</h3>
                   <p className="text-xs text-slate-500">
-                    Kelola informasi barang masuk dan keluar secara terstruktur.
+                    Kelola stok gudang utama. Distribusi dilakukan dari tombol kirim.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={openCreateModal}
-                  className="rounded-2xl bg-slate-900 px-6 py-3 text-sm font-bold text-white shadow-xl transition hover:bg-slate-800 active:scale-95"
+                  className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800"
                 >
-                  <PackagePlus className="mr-2 inline h-4 w-4" />
-                  Input Stok Baru
+                  <PackagePlus className="h-4 w-4" />
+                  Tambah Barang
                 </button>
               </div>
 
               <InventoryPanel
                 items={sortedItems}
                 onEdit={openEditModal}
-                onShip={shipItem}
+                onShip={openDistributionModal}
                 onDelete={deleteItem}
               />
             </section>
           )}
 
           {activeView === "distribusi" && (
-            <section className="animate-[fadeIn_0.3s_ease-in] space-y-6">
+            <section className="space-y-6">
               <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
                 <h3 className="text-lg font-bold text-slate-800">Daftar Barang Distribusi</h3>
                 <p className="mt-1 text-xs text-slate-500">
-                  Barang yang dikirim dari gudang akan otomatis muncul di halaman ini untuk
-                  dipantau proses distribusinya.
+                  Barang yang dipindahkan dari gudang tercatat di sini, termasuk jumlah yang
+                  sudah keluar dari stok gudang.
                 </p>
               </div>
 
               <InventoryPanel
                 title="Queue Distribusi"
-                subtitle="Menampilkan barang yang sudah dipindahkan dari gudang ke distribusi"
+                subtitle="Menampilkan barang yang sudah dipindahkan dari gudang"
                 items={distributionInventoryItems}
                 onEdit={openEditModal}
-                onShip={shipItem}
+                onShip={openDistributionModal}
                 onDelete={deleteItem}
                 mode="distribution"
               />
             </section>
           )}
 
+          {activeView === "laporan" && (
+            <section className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-3">
+                <ReportCard
+                  title="Laporan Inventori"
+                  description="Unduh stok gudang aktif beserta jumlah, status, dan tanggal expired."
+                  onDownload={() => downloadReport("inventory")}
+                />
+                <ReportCard
+                  title="Laporan Distribusi"
+                  description="Unduh data barang yang sudah keluar dari gudang ke distribusi."
+                  onDownload={() => downloadReport("distribution")}
+                />
+                <ReportCard
+                  title="Laporan Riwayat"
+                  description="Unduh log perubahan data dan aktivitas distribusi dalam format CSV."
+                  onDownload={() => downloadReport("history")}
+                />
+              </div>
+
+              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h3 className="text-lg font-bold text-slate-800">Apa yang masuk ke laporan?</h3>
+                <div className="mt-5 grid gap-4 md:grid-cols-3">
+                  <InfoPill
+                    title="Inventori"
+                    text={`${db.length} item gudang aktif siap diekspor.`}
+                  />
+                  <InfoPill
+                    title="Distribusi"
+                    text={`${distribution.length} item distribusi tercatat saat ini.`}
+                  />
+                  <InfoPill
+                    title="Riwayat"
+                    text={`${history.length} log aktivitas dapat diunduh ke CSV.`}
+                  />
+                </div>
+              </div>
+            </section>
+          )}
+
           {activeView === "riwayat" && (
-            <section className="animate-[fadeIn_0.3s_ease-in] space-y-6">
+            <section className="space-y-6">
               <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white">
                 <div className="border-b border-slate-100 bg-slate-50/50 p-4 font-bold md:p-6">
                   Log Audit Sistem
@@ -711,22 +1130,13 @@ export default function LogistikSejahteraPage() {
                   </p>
                 ) : (
                   <div className="divide-y divide-slate-50">
-                    {history.slice(0, 10).map((item, index) => (
+                    {history.map((item) => (
                       <div
-                        key={`${item.time}-${index}`}
-                        className="flex items-start gap-4 p-4 transition hover:bg-slate-50 md:items-center md:p-5"
+                        key={`${item.time}-${item.action}`}
+                        className="flex flex-col gap-2 p-4 md:flex-row md:items-center md:justify-between md:px-6"
                       >
-                        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
-                          <History className="h-4 w-4" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold leading-tight text-slate-700">
-                            {item.action}
-                          </p>
-                          <p className="mt-1 text-[10px] font-medium uppercase tracking-wider text-slate-400">
-                            {item.time}
-                          </p>
-                        </div>
+                        <p className="font-semibold text-slate-700">{item.action}</p>
+                        <p className="text-xs text-slate-400">{item.time}</p>
                       </div>
                     ))}
                   </div>
@@ -736,86 +1146,107 @@ export default function LogistikSejahteraPage() {
           )}
 
           {activeView === "pengaturan" && (
-            <section className="animate-[fadeIn_0.3s_ease-in] space-y-6">
-              <div className="max-w-xl rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-8">
-                <h3 className="mb-6 text-lg font-bold">Database Control</h3>
-                <div className="space-y-4">
-                  <div className="flex flex-col gap-4 rounded-2xl border border-red-100 bg-red-50 p-5 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <p className="text-sm font-bold text-red-700">
-                        Hapus Semua Data
+            <section className="space-y-6">
+              <div className="grid gap-6 lg:grid-cols-[1fr_0.8fr]">
+                <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-8">
+                  <h3 className="mb-6 text-lg font-bold">Akun Aktif</h3>
+                  <div className="rounded-2xl border border-slate-100 bg-slate-50 p-5">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                      Username
+                    </p>
+                    <p className="mt-3 text-xl font-bold text-slate-800">
+                      {authState.user.username}
+                    </p>
+                    <p className="mt-2 text-sm text-slate-500">
+                      Session login disimpan lewat cookie HTTP-only di browser.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => void handleLogout()}
+                    disabled={isSaving}
+                    className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-70"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Logout
+                  </button>
+                </div>
+
+                <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-8">
+                  <h3 className="mb-6 text-lg font-bold">Database Control</h3>
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-red-100 bg-red-50 p-5">
+                      <p className="text-sm font-bold text-red-700">Hapus Semua Data</p>
+                      <p className="mt-2 text-xs italic text-red-600/70">
+                        Membersihkan semua data inventori, distribusi, dan log di Supabase.
                       </p>
-                      <p className="text-xs italic text-red-600/70">
-                        Membersihkan semua data inventori dan log di Supabase.
-                      </p>
+                      <button
+                        type="button"
+                        onClick={clearAllData}
+                        disabled={isSaving}
+                        className="mt-4 rounded-xl bg-red-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-red-700 disabled:opacity-70"
+                      >
+                        {isSaving ? "MEMPROSES..." : "WIPE DATA"}
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={clearAllData}
-                      disabled={isSaving}
-                      className="rounded-xl bg-red-600 px-4 py-2 text-xs font-bold text-white hover:bg-red-700"
-                    >
-                      {isSaving ? "MEMPROSES..." : "WIPE DATA"}
-                    </button>
                   </div>
                 </div>
               </div>
             </section>
           )}
         </div>
+
+        <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-2 py-2 backdrop-blur md:hidden">
+          <div className="grid grid-cols-6 gap-1">
+            {mobileNavItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeView === item.id;
+
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setActiveView(item.id)}
+                  className={`flex flex-col items-center gap-1 rounded-2xl px-2 py-2 text-[10px] font-semibold transition ${
+                    isActive ? "bg-blue-50 text-blue-700" : "text-slate-500"
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {item.mobileLabel}
+                </button>
+              );
+            })}
+          </div>
+        </nav>
       </main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
-        <div className="grid grid-cols-5 gap-2">
-          {mobileNavItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeView === item.id;
-
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setActiveView(item.id)}
-                className={`flex flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-semibold transition ${
-                  isActive
-                    ? "bg-slate-900 text-white"
-                    : "text-slate-500 hover:bg-slate-100"
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                {item.mobileLabel}
-              </button>
-            );
-          })}
-        </div>
-      </nav>
-
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-0 backdrop-blur-md md:items-center md:p-4">
-          <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-t-[2rem] bg-white shadow-2xl md:rounded-[2rem]">
-            <div className="bg-slate-900 p-6 text-white md:p-8">
-              <div className="mb-1 flex items-center justify-between">
-                <h3 className="text-xl font-bold md:text-2xl">
-                  {isEditMode ? "Edit Inventori" : "Input Inventori"}
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
+          <div className="w-full max-w-2xl overflow-hidden rounded-[2rem] bg-white shadow-2xl">
+            <div className="flex items-start justify-between bg-slate-900 px-5 py-5 text-white md:px-8">
+              <div>
+                <h3 className="text-xl font-black">
+                  {isEditMode ? "Edit Data Barang" : "Input Stok Baru"}
                 </h3>
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="text-slate-400 transition hover:text-white"
-                >
-                  <X className="h-6 w-6" />
-                </button>
+                <p className="mt-1 text-xs text-slate-400">
+                  {isEditMode
+                    ? "Perbarui data stok gudang agar sesuai kondisi aktual."
+                    : "Barang baru akan disimpan sebagai stok gudang utama."}
+                </p>
               </div>
-              <p className="text-xs text-slate-400">
-                {isEditMode
-                  ? "Perbarui data barang untuk memperbaiki kesalahan input."
-                  : "Pastikan data sesuai dengan fisik gudang."}
-              </p>
+              <button
+                type="button"
+                onClick={closeModal}
+                className="text-slate-400 transition hover:text-white"
+              >
+                <X className="h-6 w-6" />
+              </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-5 overflow-y-auto p-5 md:p-8">
+            <form onSubmit={handleSubmit} className="space-y-5 p-5 md:p-8">
               <div>
-                <label className="ml-1 mb-1.5 block text-[10px] font-bold uppercase text-slate-400">
+                <label className="mb-1.5 ml-1 block text-[10px] font-bold uppercase text-slate-400">
                   Nama Produk
                 </label>
                 <input
@@ -832,8 +1263,8 @@ export default function LogistikSejahteraPage() {
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="ml-1 mb-1.5 block text-[10px] font-bold uppercase text-slate-400">
-                    Jumlah Unit
+                  <label className="mb-1.5 ml-1 block text-[10px] font-bold uppercase text-slate-400">
+                    Jumlah Unit Gudang
                   </label>
                   <input
                     type="number"
@@ -847,52 +1278,33 @@ export default function LogistikSejahteraPage() {
                       }))
                     }
                     placeholder="0"
-                    className="w-full rounded-2xl border border-slate-100 bg-slate-50 p-4 outline-none transition-all focus:ring-4 focus:ring-blue-100"
+                    className="w-full rounded-2xl border border-slate-100 bg-slate-50 p-4 outline-none transition focus:ring-4 focus:ring-blue-100"
                   />
                 </div>
 
                 <div>
-                  <label className="ml-1 mb-1.5 block text-[10px] font-bold uppercase text-slate-400">
-                    Lokasi
+                  <label className="mb-1.5 ml-1 block text-[10px] font-bold uppercase text-red-500">
+                    Tanggal Kedaluwarsa
                   </label>
-                  <select
-                    value={form.status}
+                  <input
+                    type="date"
+                    required
+                    value={form.expired}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
-                        status: event.target.value as ItemStatus,
+                        expired: event.target.value,
                       }))
                     }
-                    className="w-full appearance-none rounded-2xl border border-slate-100 bg-slate-50 p-4 outline-none"
-                  >
-                    <option value="Gudang">Gudang Utama</option>
-                    <option value="Distribusi">Distribusi</option>
-                  </select>
+                    className="w-full rounded-2xl border border-red-100 bg-red-50 p-4 font-bold text-red-700 outline-none transition focus:ring-4 focus:ring-red-50"
+                  />
                 </div>
-              </div>
-
-              <div>
-                <label className="ml-1 mb-1.5 block text-[10px] font-bold uppercase text-red-500">
-                  Tanggal Kedaluwarsa
-                </label>
-                <input
-                  type="date"
-                  required
-                  value={form.expired}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      expired: event.target.value,
-                    }))
-                  }
-                  className="w-full rounded-2xl border border-red-100 bg-red-50 p-4 font-bold text-red-700 outline-none transition-all focus:ring-4 focus:ring-red-50"
-                />
               </div>
 
               <button
                 type="submit"
                 disabled={isSaving}
-                className="mt-4 w-full rounded-2xl bg-blue-600 py-5 font-bold text-white shadow-xl shadow-blue-200 transition hover:bg-blue-700 active:scale-95"
+                className="mt-4 w-full rounded-2xl bg-blue-600 py-5 font-bold text-white shadow-xl shadow-blue-200 transition hover:bg-blue-700 disabled:opacity-70"
               >
                 {isSaving
                   ? isEditMode
@@ -906,6 +1318,84 @@ export default function LogistikSejahteraPage() {
           </div>
         </div>
       )}
+
+      {isDistributionModalOpen && distributionTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
+          <div className="w-full max-w-lg overflow-hidden rounded-[2rem] bg-white shadow-2xl">
+            <div className="flex items-start justify-between bg-emerald-600 px-5 py-5 text-white md:px-8">
+              <div>
+                <h3 className="text-xl font-black">Kirim ke Distribusi</h3>
+                <p className="mt-1 text-xs text-emerald-50/90">
+                  Stok gudang akan langsung berkurang setelah distribusi disimpan.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeDistributionModal}
+                className="text-emerald-100 transition hover:text-white"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+
+            <form onSubmit={submitDistribution} className="space-y-5 p-5 md:p-8">
+              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                <p className="text-sm font-bold text-slate-800">{distributionTarget.nama}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Stok gudang tersedia: {distributionTarget.jumlah.toLocaleString("id-ID")} Pcs
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-1.5 ml-1 block text-[10px] font-bold uppercase text-slate-400">
+                  Jumlah yang Didistribusikan
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={distributionTarget.jumlah}
+                  required
+                  value={distributionForm.quantity}
+                  onChange={(event) =>
+                    setDistributionForm({
+                      quantity: event.target.value,
+                    })
+                  }
+                  className="w-full rounded-2xl border border-slate-100 bg-slate-50 p-4 outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-4 focus:ring-emerald-100"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="w-full rounded-2xl bg-emerald-600 py-5 font-bold text-white shadow-xl shadow-emerald-100 transition hover:bg-emerald-700 disabled:opacity-70"
+              >
+                {isSaving ? "MENYIMPAN DISTRIBUSI..." : "SIMPAN DISTRIBUSI"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FeatureCard({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon: ElementType;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="rounded-[1.5rem] border border-slate-200 bg-slate-50 p-5">
+      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-slate-800 shadow-sm">
+        <Icon className="h-5 w-5" />
+      </div>
+      <h3 className="mt-4 text-base font-bold text-slate-800">{title}</h3>
+      <p className="mt-2 text-sm leading-6 text-slate-500">{description}</p>
     </div>
   );
 }
@@ -959,13 +1449,13 @@ function InventoryPanel({
   subtitle?: string;
   items: InventoryItem[];
   onEdit: (item: InventoryItem) => void;
-  onShip: (id: number) => void;
+  onShip: (item: InventoryItem) => void;
   onDelete: (id: number) => void;
   mode?: "inventory" | "distribution";
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<ExpiryFilter>("all");
-  const showShipAction = mode === "inventory";
+  const isReadOnly = mode === "distribution";
 
   const filteredItems = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -1059,7 +1549,9 @@ function InventoryPanel({
       {filteredItems.length === 0 ? (
         <div className="p-12 text-center italic text-slate-400">
           {items.length === 0
-            ? "Belum ada data di gudang."
+            ? isReadOnly
+              ? "Belum ada data distribusi."
+              : "Belum ada data di gudang."
             : "Tidak ada barang yang cocok dengan pencarian atau filter."}
         </div>
       ) : (
@@ -1067,7 +1559,6 @@ function InventoryPanel({
           <div className="divide-y divide-slate-100 md:hidden">
             {filteredItems.map((item) => {
               const label = getConditionLabel(item.expired);
-              const isInWarehouse = item.status === "Gudang";
               const metadata = getItemMetadata(item);
 
               return (
@@ -1122,45 +1613,43 @@ function InventoryPanel({
                     </p>
                   </div>
 
-                  <div className="flex gap-2">
-                    {showShipAction && label.blocked && isInWarehouse ? (
-                      <div className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-400">
-                        <XCircle className="h-4 w-4" />
-                        Tidak Layak Distribusi
-                      </div>
-                    ) : null}
+                  {!isReadOnly ? (
+                    <div className="flex gap-2">
+                      {label.blocked ? (
+                        <div className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-400">
+                          <XCircle className="h-4 w-4" />
+                          Tidak Layak Distribusi
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => onShip(item)}
+                          className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-600 transition hover:bg-blue-600 hover:text-white"
+                        >
+                          <Send className="h-4 w-4" />
+                          Distribusi
+                        </button>
+                      )}
 
-                    <button
-                      type="button"
-                      onClick={() => onEdit(item)}
-                      className="flex items-center justify-center gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700 transition hover:bg-amber-500 hover:text-white"
-                    >
-                      <Pencil className="h-4 w-4" />
-                      Edit
-                    </button>
-
-                    {showShipAction && isInWarehouse && !label.blocked && (
                       <button
                         type="button"
-                        onClick={() => onShip(item.id)}
-                        className={`flex flex-1 items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold transition ${
-                          "bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white"
-                        }`}
+                        onClick={() => onEdit(item)}
+                        className="flex items-center justify-center gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700 transition hover:bg-amber-500 hover:text-white"
                       >
-                        <Send className="h-4 w-4" />
-                        Distribusi
+                        <Pencil className="h-4 w-4" />
+                        Edit
                       </button>
-                    )}
 
-                    <button
-                      type="button"
-                      onClick={() => onDelete(item.id)}
-                      className="flex items-center justify-center gap-2 rounded-2xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-500 transition hover:bg-red-500 hover:text-white"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      Hapus
-                    </button>
-                  </div>
+                      <button
+                        type="button"
+                        onClick={() => onDelete(item.id)}
+                        className="flex items-center justify-center gap-2 rounded-2xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-500 transition hover:bg-red-500 hover:text-white"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Hapus
+                      </button>
+                    </div>
+                  ) : null}
                 </article>
               );
             })}
@@ -1168,112 +1657,146 @@ function InventoryPanel({
 
           <div className="hidden overflow-x-auto md:block">
             <table className="w-full text-left">
-            <thead className="bg-slate-50 text-[10px] font-bold uppercase text-slate-400">
-              <tr>
-                <th className="px-6 py-4">Nama Inventori</th>
-                <th className="px-6 py-4">Status &amp; Stok</th>
-                <th className="px-6 py-4">Label Penanda</th>
-                <th className="px-6 py-4">Tanggal Exp</th>
-                <th className="px-6 py-4 text-right">Tindakan</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredItems.map((item) => {
-                const label = getConditionLabel(item.expired);
-                const isInWarehouse = item.status === "Gudang";
-                const metadata = getItemMetadata(item);
+              <thead className="bg-slate-50 text-[10px] font-bold uppercase text-slate-400">
+                <tr>
+                  <th className="px-6 py-4">Nama Inventori</th>
+                  <th className="px-6 py-4">Status &amp; Stok</th>
+                  <th className="px-6 py-4">Label Penanda</th>
+                  <th className="px-6 py-4">Tanggal Exp</th>
+                  {!isReadOnly && <th className="px-6 py-4 text-right">Tindakan</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredItems.map((item) => {
+                  const label = getConditionLabel(item.expired);
+                  const metadata = getItemMetadata(item);
 
-                return (
-                  <tr key={item.id} className="group transition hover:bg-slate-50">
-                    <td className="px-6 py-5">
-                      <p className="font-bold text-slate-700">{item.nama}</p>
-                      <p className="text-[9px] text-slate-400">
-                        ID: {item.id} | {metadata.kategori} | {metadata.batch}
-                      </p>
-                      <p className="text-[9px] text-slate-400">{metadata.lokasi}</p>
-                    </td>
+                  return (
+                    <tr key={item.id} className="group transition hover:bg-slate-50">
+                      <td className="px-6 py-5">
+                        <p className="font-bold text-slate-700">{item.nama}</p>
+                        <p className="text-[9px] text-slate-400">
+                          ID: {item.id} | {metadata.kategori} | {metadata.batch}
+                        </p>
+                        <p className="text-[9px] text-slate-400">{metadata.lokasi}</p>
+                      </td>
 
-                    <td className="px-6 py-5">
-                      <div className="mb-1 flex items-center gap-2">
-                        <span
-                          className={`h-1.5 w-1.5 rounded-full ${
-                            item.status === "Gudang" ? "bg-blue-500" : "bg-emerald-500"
-                          }`}
-                        />
-                        <span className="text-xs font-bold text-slate-600">
-                          {item.status}
-                        </span>
-                      </div>
-                      <p className="text-xs font-medium text-slate-400">
-                        {item.jumlah} Pcs
-                      </p>
-                    </td>
-
-                    <td className="px-6 py-5">
-                      <div
-                        className={`flex w-fit items-center gap-2 rounded-xl border px-3 py-1.5 ${label.color}`}
-                      >
-                        <ConditionIcon type={label.icon} />
-                        <span className="text-[9px] font-extrabold uppercase tracking-tight">
-                          {label.text}
-                        </span>
-                      </div>
-                    </td>
-
-                    <td className="px-6 py-5">
-                      <p className="font-mono text-sm font-bold text-slate-600">
-                        {item.expired}
-                      </p>
-                    </td>
-
-                    <td className="px-6 py-5 text-right">
-                      <div className="flex justify-end gap-2 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
-                        {showShipAction && label.blocked && isInWarehouse ? (
-                          <span className="inline-flex items-center rounded-xl bg-slate-100 px-3 text-[11px] font-semibold text-slate-400">
-                            Tidak Layak Distribusi
-                          </span>
-                        ) : null}
-
-                        <button
-                          type="button"
-                          onClick={() => onEdit(item)}
-                          className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-600 transition hover:bg-amber-500 hover:text-white"
-                          title="Edit barang"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-
-                        {showShipAction && isInWarehouse && !label.blocked && (
-                          <button
-                            type="button"
-                            onClick={() => onShip(item.id)}
-                            className={`flex h-10 w-10 items-center justify-center rounded-xl transition ${
-                              "bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white"
+                      <td className="px-6 py-5">
+                        <div className="mb-1 flex items-center gap-2">
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${
+                              item.status === "Gudang" ? "bg-blue-500" : "bg-emerald-500"
                             }`}
-                            title="Kirim ke distribusi"
-                          >
-                            <Send className="h-4 w-4" />
-                          </button>
-                        )}
+                          />
+                          <span className="text-xs font-bold text-slate-600">{item.status}</span>
+                        </div>
+                        <p className="text-xs font-medium text-slate-400">
+                          {item.jumlah} Pcs
+                        </p>
+                      </td>
 
-                        <button
-                          type="button"
-                          onClick={() => onDelete(item.id)}
-                          className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-50 text-red-400 transition hover:bg-red-500 hover:text-white"
-                          title="Hapus barang"
+                      <td className="px-6 py-5">
+                        <div
+                          className={`flex w-fit items-center gap-2 rounded-xl border px-3 py-1.5 ${label.color}`}
                         >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                          <ConditionIcon type={label.icon} />
+                          <span className="text-[9px] font-extrabold uppercase tracking-tight">
+                            {label.text}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="px-6 py-5">
+                        <p className="font-mono text-sm font-bold text-slate-600">
+                          {item.expired}
+                        </p>
+                      </td>
+
+                      {!isReadOnly && (
+                        <td className="px-6 py-5 text-right">
+                          <div className="flex justify-end gap-2 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
+                            {label.blocked ? (
+                              <span className="inline-flex items-center rounded-xl bg-slate-100 px-3 text-[11px] font-semibold text-slate-400">
+                                Tidak Layak Distribusi
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => onShip(item)}
+                                className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600 transition hover:bg-blue-600 hover:text-white"
+                                title="Kirim ke distribusi"
+                              >
+                                <Send className="h-4 w-4" />
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => onEdit(item)}
+                              className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-600 transition hover:bg-amber-500 hover:text-white"
+                              title="Edit barang"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => onDelete(item.id)}
+                              className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-50 text-red-400 transition hover:bg-red-500 hover:text-white"
+                              title="Hapus barang"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function ReportCard({
+  title,
+  description,
+  onDownload,
+}: {
+  title: string;
+  description: string;
+  onDownload: () => void;
+}) {
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+        <Download className="h-5 w-5" />
+      </div>
+      <h3 className="mt-5 text-lg font-bold text-slate-800">{title}</h3>
+      <p className="mt-2 text-sm leading-6 text-slate-500">{description}</p>
+      <button
+        type="button"
+        onClick={onDownload}
+        className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-bold text-white transition hover:bg-slate-800"
+      >
+        <Download className="h-4 w-4" />
+        Download CSV
+      </button>
+    </div>
+  );
+}
+
+function InfoPill({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+      <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">
+        {title}
+      </p>
+      <p className="mt-3 text-sm font-semibold text-slate-700">{text}</p>
     </div>
   );
 }

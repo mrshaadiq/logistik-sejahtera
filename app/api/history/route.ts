@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 
+import { requireAuth } from "@/lib/auth";
 import { listHistoryLogs } from "@/lib/logistics-data";
 
 export async function GET() {
   try {
+    const auth = await requireAuth();
+    if (auth instanceof NextResponse) {
+      return auth;
+    }
+
     const history = await listHistoryLogs();
     return NextResponse.json(history);
   } catch (error) {

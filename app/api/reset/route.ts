@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 
+import { requireAuth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function POST() {
   try {
+    const auth = await requireAuth();
+    if (auth instanceof NextResponse) {
+      return auth;
+    }
+
     const { error: distributionError } = await supabaseAdmin
       .from("distribution_items")
       .delete()

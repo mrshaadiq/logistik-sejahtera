@@ -11,7 +11,7 @@ export type InventoryItem = {
 
 export type DistributionItem = {
   id: number;
-  inventoryItemId: number;
+  inventoryItemId: number | null;
   nama: string;
   jumlah: number;
   status: ItemStatus;
